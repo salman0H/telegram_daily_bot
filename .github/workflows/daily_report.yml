@@ -2,41 +2,80 @@ name: Daily Telegram Report Bot
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '30 4 * * *' # 08:00 Asia/Tehran (UTC+03:30)
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview in Actions logs without sending to Telegram'
+        type: boolean
+        default: false
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-report-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  execute-bot:
+  check:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.14']
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run offline regression tests
+        run: |
+          python -m compileall -q src tests
+          python -m unittest discover -s tests -v
 
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+  execute-bot:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ENABLE_AUDIO_DOWNLOAD: ${{ vars.ENABLE_AUDIO_DOWNLOAD || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install System Dependencies
+      - name: Install optional audio dependencies
+        if: env.ENABLE_AUDIO_DOWNLOAD == 'true' && inputs.dry_run != true
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
-      - name: Install Python Requirements
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Main Script
+          python -m pip install -r requirements-audio.txt
+      - name: Generate daily report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
           SPORTRADAR_SOCCER_API_KEY: ${{ secrets.SPORTRADAR_SOCCER_API_KEY }}
           SPORTRADAR_BASKETBALL_API_KEY: ${{ secrets.SPORTRADAR_BASKETBALL_API_KEY }}
-          SPORTRADAR_VOLLEYBALL_API_KEY: ${{ secrets.SPORTRADAR_VOLLEYBALL_API_KEY }}
-        run: python -m src.main
+          TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Tehran' }}
+          CITY_NAME: ${{ vars.CITY_NAME || 'مشهد' }}
+          WEATHER_LAT: ${{ vars.WEATHER_LAT || '36.2605' }}
+          WEATHER_LON: ${{ vars.WEATHER_LON || '59.6168' }}
+          NEWS_MAX_AGE_HOURS: ${{ vars.NEWS_MAX_AGE_HOURS || '36' }}
+          NEWS_PER_CATEGORY: ${{ vars.NEWS_PER_CATEGORY || '2' }}
+          GROQ_MODELS: ${{ vars.GROQ_MODELS || 'openai/gpt-oss-120b,llama-3.3-70b-versatile' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python -m src.main --dry-run
+          else
+            python -m src.main
+          fi

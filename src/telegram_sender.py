@@ -1,107 +1,92 @@
-import sys
+"""Telegram delivery without unsafe HTML truncation or blind POST retries."""
 import json
-import uuid
-import os
-import re
-import html
 import mimetypes
-import urllib.request
+import os
+import time
 import urllib.error
+import urllib.request
+import uuid
 from src import config
+from src.formatting import render, split_message, utf16_length
+
+_LAST_SEND = 0.0
+MAX_AUDIO_BYTES = 45 * 1024 * 1024
+
+
+class TelegramError(RuntimeError):
+    pass
+
 
 def _resolve_target():
-    chan_id = str(config.TELEGRAM_CHANNEL_ID).strip()
-    user_id = str(config.TELEGRAM_USER_ID).strip()
+    target = config.TELEGRAM_CHANNEL_ID or config.TELEGRAM_USER_ID
+    if not target:
+        raise TelegramError("Telegram destination is missing")
+    return target
 
-    if chan_id and chan_id.lower() not in ["null", "none", ""]:
-        return chan_id
-    if user_id and user_id.lower() not in ["null", "none", ""]:
-        return user_id
-        
-    sys.exit("Critical: Valid TELEGRAM_CHANNEL_ID or TELEGRAM_USER_ID not found.")
 
-def _sanitize_for_telegram_html(text: str) -> str:
-    if not text:
-        return ""
-
-    if text.count('```') % 2 != 0:
-        text += '\n```\n'
-        
-    text = text.replace('<blockquote>', '').replace('</blockquote>', '')
-    text = text.replace('<b>', '**').replace('</b>', '**')
-    
-    text = html.escape(text, quote=False)
-    text = re.sub(r'^\s*#+\s*', '', text, flags=re.MULTILINE)
-    
-    text = re.sub(r'```(\w+)?\s*\n(.*?)\s*```', r'<pre><code class="language-\1">\2</code></pre>', text, flags=re.DOTALL)
-    text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    
-    open_b = text.count('<b>')
-    close_b = text.count('</b>')
-    if open_b > close_b:
-        text += '</b>' * (open_b - close_b)
-        
-    return text.strip()
-
-def send_message(text: str):
-    chat_id = _resolve_target()
-    text = _sanitize_for_telegram_html(text)
-    
-    if len(text) > 4096:
-        text = text[:4090] + "..."
-
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True,
-        "parse_mode": "HTML"
-    }
-
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        payload.pop("parse_mode", None)
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+def _post(method, body, content_type, timeout=20):
+    global _LAST_SEND
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/{method}"
+    for attempt in range(3):
+        # Multiple messages to one chat should not burst above one per second.
+        time.sleep(max(0, 1.05 - (time.monotonic() - _LAST_SEND)))
+        request = urllib.request.Request(url, data=body, headers={"Content-Type": content_type})
         try:
-            with urllib.request.urlopen(req, timeout=15) as retry_resp:
-                return json.loads(retry_resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as retry_e:
-            sys.exit(f"Telegram API Error ({retry_e.code}): {retry_e.read().decode('utf-8')}")
+            _LAST_SEND = time.monotonic()
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            if not isinstance(result, dict) or not result.get("ok"):
+                raise TelegramError("Telegram rejected the response")
+            return result
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            try:
+                error = json.loads(exc.read().decode("utf-8"))
+            except (ValueError, UnicodeError):
+                error = {}
+            finally:
+                exc.close()
+            if status == 429 and attempt < 2:
+                parameters = error.get("parameters", {}) if isinstance(error, dict) else {}
+                delay = parameters.get("retry_after", 2) if isinstance(parameters, dict) else 2
+                if isinstance(delay, (int, float)) and 0 <= delay <= 30:
+                    time.sleep(delay)
+                    continue
+            raise TelegramError(f"Telegram {method} failed (HTTP {status})") from None
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            # A lost response may already have been delivered. Do not duplicate it.
+            raise TelegramError(f"Telegram {method} failed ({type(exc).__name__}); delivery uncertain") from None
+    raise TelegramError("Telegram retry limit reached")
 
-def send_audio(file_path: str, caption: str = ""):
-    if not file_path or not os.path.exists(file_path):
+
+def send_message(text):
+    if not text or not text.strip():
+        return []
+    responses = []
+    for chunk, entities in split_message(text):
+        payload = {"chat_id": _resolve_target(), "text": chunk, "entities": entities,
+                   "link_preview_options": {"is_disabled": True}}
+        responses.append(_post("sendMessage", json.dumps(payload).encode(), "application/json"))
+    return responses
+
+
+def send_audio(file_path, caption=""):
+    if not file_path or not os.path.isfile(file_path):
         return None
-
-    chat_id = _resolve_target()
-    caption = _sanitize_for_telegram_html(caption)
+    if not 0 < os.path.getsize(file_path) <= MAX_AUDIO_BYTES:
+        raise TelegramError("Audio must be nonempty and at most 45 MiB")
+    caption, entities = render(caption)
+    if utf16_length(caption) > 1024:
+        raise TelegramError("Audio caption exceeds 1024 UTF-16 units")
     boundary = uuid.uuid4().hex
-    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
     body = bytearray()
-
-    fields = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
-    for k, v in fields.items():
-        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8"))
-
-    filename = os.path.basename(file_path)
-    mime_type = mimetypes.guess_type(filename)[0] or "audio/mpeg"
-    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"{filename}\"\r\nContent-Type: {mime_type}\r\n\r\n".encode("utf-8"))
-    
-    with open(file_path, "rb") as f:
-        body.extend(f.read())
-    body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
-
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendAudio"
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError:
-        return None
+    fields = {"chat_id": _resolve_target(), "caption": caption, "caption_entities": json.dumps(entities)}
+    for key, value in fields.items():
+        body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode())
+    # Fixed multipart filename prevents header injection from local paths.
+    mime_type = mimetypes.guess_type(file_path)[0] or "audio/mpeg"
+    body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio.mp3"\r\nContent-Type: {mime_type}\r\n\r\n'.encode())
+    with open(file_path, "rb") as audio:
+        body.extend(audio.read())
+    body.extend(f"\r\n--{boundary}--\r\n".encode())
+    return _post("sendAudio", bytes(body), f"multipart/form-data; boundary={boundary}", timeout=90)

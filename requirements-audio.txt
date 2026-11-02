@@ -1,0 +1,2 @@
+# Media extractors need regular updates as upstream sites change.
+yt-dlp>=2025.3.31,<2027
