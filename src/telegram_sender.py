@@ -23,6 +23,13 @@ class TelegramError(RuntimeError):
     pass
 
 
+class RecipientUnavailableError(TelegramError):
+    """Telegram forbids delivery: blocked bot, deactivated user, or no chat access."""
+    def __init__(self, message, *, chat_id=None):
+        super().__init__(message)
+        self.chat_id = str(chat_id) if chat_id is not None else None
+
+
 @contextmanager
 def delivery_target(chat_id):
     """Scope all text, photo, and audio delivery without changing global config."""
@@ -70,6 +77,9 @@ def _post(method, body, content_type, timeout=20):
                 if isinstance(delay, (int, float)) and 0 <= delay <= 30:
                     time.sleep(delay)
                     continue
+            if status == 403 and method in {"sendMessage", "sendPhoto", "sendAudio"}:
+                raise RecipientUnavailableError(
+                    f"Telegram {method}: recipient unavailable (HTTP 403)", chat_id=_resolve_target()) from None
             raise TelegramError(f"Telegram {method} failed (HTTP {status})") from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             # A lost response may already have been delivered. Do not duplicate it.
@@ -127,6 +137,8 @@ def send_illustrated_message(text, image_url=""):
     caption, entities = next(chunks, ("", []))
     try:
         photo_result = _send_photo_chunk(image_url, caption, entities)
+    except RecipientUnavailableError:
+        raise
     except TelegramError as exc:
         LOGGER.warning("Photo unavailable; sending text instead: %s", exc)
         return send_message(text)

@@ -73,12 +73,16 @@ def build_report():
 
 
 def run(dry_run=False, *, export_report=None):
+    if not config.BOT_ENABLED:
+        LOGGER.info("Bot is paused (BOT_ENABLED=false)")
+        return 0
     config.validate(for_delivery=not dry_run)
     snapshot, track = build_report()
     if export_report:
         save_report(export_report, snapshot)
     messages = snapshot["messages"]
     failed = False
+    recipient_unavailable = False
     for message in messages:
         if dry_run:
             print(message["text"])
@@ -88,10 +92,15 @@ def run(dry_run=False, *, export_report=None):
             continue
         try:
             telegram_sender.send_illustrated_message(message["text"], message["image_url"])
+        except telegram_sender.RecipientUnavailableError as exc:
+            LOGGER.warning("Daily destination unavailable; remaining delivery skipped: %s", exc)
+            failed = True
+            recipient_unavailable = True
+            break
         except telegram_sender.TelegramError as exc:
             LOGGER.error("%s", exc)
             failed = True
-    if track and config.ENABLE_AUDIO_DOWNLOAD and not dry_run:
+    if track and config.ENABLE_AUDIO_DOWNLOAD and not dry_run and not recipient_unavailable:
         with tempfile.TemporaryDirectory(prefix="daily-bot-") as directory:
             path = song.download_audio(f"{track['artist']} - {track['title']}", directory)
             if path:

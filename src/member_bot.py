@@ -40,6 +40,7 @@ class MemberBot:
         self.max_reports = max_reports
         self.report_count = 0
         self.served = set()
+        self.unreachable = set()
         self.username = ""
         self.channel_link = join_url()
 
@@ -110,6 +111,8 @@ class MemberBot:
         if (chat.get("type") != "private" or not isinstance(user_id, int) or isinstance(user_id, bool)
                 or user_id <= 0 or chat.get("id") != user_id or sender.get("is_bot")):
             return
+        if str(user_id) in self.unreachable:
+            return
         if isinstance(callback, dict):
             if callback.get("data") not in {"report", "check_membership"}:
                 return
@@ -133,6 +136,9 @@ class MemberBot:
             self._send(user_id, "برای دریافت آخرین گزارش، /report را بفرستید یا دکمهٔ زیر را بزنید. دریافت گزارش نیازمند عضویت در کانال است.", REPORT_BUTTON)
 
     def process_pending(self):
+        if not config.BOT_ENABLED:
+            LOGGER.info("Bot is paused (BOT_ENABLED=false)")
+            return
         self.check_setup()
         payload = {"limit": 100, "timeout": 0, "allowed_updates": ALLOWED_UPDATES}
         updates = telegram.call_api("getUpdates", payload)
@@ -145,6 +151,10 @@ class MemberBot:
                 raise telegram.TelegramError("Invalid Telegram update identifier")
             try:
                 self.handle_update(update)
+            except telegram.RecipientUnavailableError as exc:
+                if exc.chat_id is not None:
+                    self.unreachable.add(exc.chat_id)
+                LOGGER.info("Recipient unavailable; request skipped")
             except telegram.TelegramError as exc:
                 # Blocked chats or failed deliveries must not trap the entire queue.
                 LOGGER.warning("Request delivery failed: %s", exc)
@@ -159,6 +169,9 @@ def main():
     parser.add_argument("--report", default="report-cache/daily-report.json", help="Path to the latest public report snapshot")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if not config.BOT_ENABLED:
+        LOGGER.info("Bot is paused (BOT_ENABLED=false)")
+        return 0
     try:
         try:
             report = load_report(args.report)

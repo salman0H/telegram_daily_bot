@@ -136,6 +136,7 @@ Set these as environment variables locally or in the repository's Actions **Vari
 
 | Variable | Default | What it controls |
 | :--- | :--- | :--- |
+| `BOT_ENABLED` | `true` | Set to `false` to pause daily generation/delivery and member request processing. |
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for display and sports calendar boundaries. |
 | `CITY_NAME` | Mashhad, displayed in Persian | Weather section label; changing it does not change coordinates. |
 | `WEATHER_LAT` | `36.2605` | Latitude, from -90 to 90. |
@@ -244,6 +245,22 @@ python -m src.member_bot --report report-cache/daily-report.json
 
 The second command contacts Telegram and replies to pending users. Pause the Actions responder first to prevent concurrent consumers.
 
+## Pause, resume, and blocked users
+
+To pause the whole bot, open **Settings → Secrets and variables → Actions → Variables** and create or update:
+
+```text
+BOT_ENABLED=false
+```
+
+Both the daily report job and the member responder will skip new runs. Checks on code changes still run. To resume, set `BOT_ENABLED=true` or remove the variable. This applies to new jobs; cancel any running jobs in the Actions UI if you need delivery to stop immediately. For local runs, export `BOT_ENABLED=false`; both CLI entry points return without fetching data, consuming updates, or sending messages.
+
+To pause **only personal requests**, keep `BOT_ENABLED` enabled and set `MEMBER_REQUESTS_ENABLED=false`. Daily channel delivery continues. Pending private requests are left unconfirmed while paused and may be processed after resuming, subject to Telegram's update retention.
+
+Users have no automatic direct-message subscription. They can stop receiving messages by blocking the bot in Telegram. If Telegram returns HTTP 403 for a delivery attempt, the recipient is treated as unavailable: remaining report messages are abandoned, the photo-to-text fallback is suppressed, and other users continue. Duplicate pending requests from that recipient are skipped within the same batch and confirmed, preventing the queue from getting stuck. These errors do not create a permanent local ban; after unblocking, the user can send `/start` again and membership is rechecked.
+
+An HTTP 403 from a membership check remains an API/access error and does not label a user as blocked. A forbidden daily posting destination stops further delivery and optional audio to that destination and still marks the daily job as failed so the owner can fix channel permissions.
+
 ## Under the hood
 
 Independent collectors run with up to five workers. Editorial calls and delivery remain ordered. Source requests use timeouts and bounded retries for temporary network failures, HTTP 429, and server errors.
@@ -273,7 +290,8 @@ telegram_daily_bot/
 ├── tests/
 │   ├── test_bot.py                   # Core offline regression tests
 │   ├── test_images.py                # Image provenance and photo delivery tests
-│   └── test_membership.py            # Access control, routing, snapshots, and update cursors
+│   ├── test_membership.py            # Access control, routing, snapshots, and update cursors
+│   └── test_controls.py              # Global pause and blocked-recipient isolation
 ├── .env.example                      # Configuration template
 ├── requirements.txt                  # Standard-library core; no third-party packages
 └── requirements-audio.txt            # Optional downloader dependency
@@ -286,7 +304,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 ```
 
-Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media. Membership tests cover denied access, live rechecks, membership API failures, private recipient isolation, join buttons, snapshot freshness, startup admin/webhook checks, and acknowledgement of only processed updates.
+Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media. Membership tests cover denied access, live rechecks, membership API failures, private recipient isolation, join buttons, snapshot freshness, startup admin/webhook checks, and acknowledgement of only processed updates. Control tests verify that pausing prevents API calls and that a blocked recipient cannot stop delivery to the next user.
 
 To change the editorial voice, edit `src/prompts.py`. To extend educational topics, update `src/insights.py`. To change news sources, update `FEEDS` in `src/news.py` and retain valid source attribution, URLs, and publication dates.
 
@@ -300,7 +318,8 @@ To change the editorial voice, edit `src/prompts.py`. To extend educational topi
 | A Telegram message fails | Later sections are still attempted; exit code `1` marks the workflow as failed. |
 | A photo is missing or rejected | The full text is sent instead; confirm that the image URL is publicly accessible to Telegram. |
 | Optional audio fails | A warning is logged; this alone does not fail the report. |
-| HTTP 401 or 403 | Check credentials, service access, and channel posting permissions. |
+| HTTP 401 or membership/API HTTP 403 | Check credentials, service access, and channel administrator permissions. |
+| Delivery HTTP 403 | Skip the unavailable recipient and continue with other users; a forbidden daily destination requires owner attention. |
 | Membership check fails | Confirm that the bot is an administrator in `MEMBERSHIP_CHANNEL_ID`; access stays closed while verification is unavailable. |
 | Member reports are delayed | Check **Member Report Requests**, Actions availability, and pending request volume. |
 | Groq is unavailable or returns invalid output | A subsequent model or original-content fallback is used; check model settings and quota. |

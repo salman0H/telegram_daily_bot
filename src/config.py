@@ -18,6 +18,7 @@ def _integer(name, default, minimum, maximum):
     return value
 
 
+BOT_ENABLED = _env("BOT_ENABLED", "true").lower() != "false"
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = _env("TELEGRAM_CHANNEL_ID")
 TELEGRAM_USER_ID = _env("TELEGRAM_USER_ID")
