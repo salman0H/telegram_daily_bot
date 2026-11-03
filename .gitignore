@@ -9,3 +9,5 @@ venv/
 *.part
 *.log
 .DS_Store
+
+report-cache/

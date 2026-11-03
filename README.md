@@ -14,7 +14,7 @@ Headline photos. Album covers. A track to press play on.
 ![GitHub Actions](https://img.shields.io/badge/Runs_on-GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
 ![Output in Persian](https://img.shields.io/badge/Digest-Persian-8B5CF6?style=flat-square)
 
-[The experience](#the-daily-lineup) · [Quick start](#quick-start) · [Configuration](#make-it-yours) · [Automation](#put-it-on-autopilot) · [Development](#under-the-hood)
+[The experience](#the-daily-lineup) · [Quick start](#quick-start) · [Configuration](#make-it-yours) · [Automation](#put-it-on-autopilot) · [Member access](#member-only-personal-delivery) · [Development](#under-the-hood)
 
 </div>
 
@@ -178,15 +178,71 @@ The workflow in [`.github/workflows/daily_report.yml`](.github/workflows/daily_r
 
 | Trigger | Behavior |
 | :--- | :--- |
-| Push or pull request | Compile and run offline tests on Python 3.11 and 3.14. |
+| Push or pull request | Run offline tests on Python 3.11 and 3.14. A push to the default branch also refreshes the public report snapshot in preview mode, without channel delivery. |
 | Daily schedule | Run checks, then generate and deliver the report at **03:30 UTC / 07:00 Tehran**. |
 | Manual workflow run | Run checks, then deliver; select `dry_run` to print a preview in Actions logs instead. |
 
 To run manually, open **Actions → Daily Telegram Report Bot → Run workflow**.
 
-The workflow has read-only repository permissions, queues overlapping runs for the same ref, and caps the report job at 12 minutes. Audio dependencies are installed only when downloads are enabled and preview mode is off.
+The daily workflow has read-only repository permissions, queues overlapping runs for the same ref, and caps the report job at 12 minutes. It uploads a content-only `daily-report` artifact with two-day retention for personal member requests. Audio dependencies are installed only when downloads are enabled and preview mode is off.
 
 The cron expression is `30 3 * * *`. Changing `TIMEZONE` changes report interpretation and display, not the cron schedule. Scheduled execution may be delayed by GitHub Actions.
+
+## Member-only personal delivery
+
+Anyone can open the bot privately and send `/start`, `/report`, or `/run` to request the latest prepared digest. Access requires current membership in **[@sentencedIntoMusic](https://t.me/sentencedIntoMusic)** by default.
+
+| User state | Bot response |
+| :--- | :--- |
+| Current channel member, administrator, or owner | Send the latest report to that user's private chat, including news photos and music artwork. |
+| Not a member or removed from the channel | Show **Join channel** and **I joined — check again** buttons. |
+| Membership cannot be checked | Explain the temporary failure; send no report. |
+| No fresh snapshot is available | Explain that the report is not ready; do not generate replacement content. |
+
+Membership is checked live on every request, including the recheck button. A restricted user qualifies only when Telegram explicitly reports `is_member: true`. Personal replies use an isolated destination context, so a configured channel destination cannot redirect a user's report. Group requests are ignored. Receiving a personal report does not subscribe the user to automatic daily direct messages.
+
+### Set up the channel
+
+1. **Make the bot an administrator** in `@sentencedIntoMusic`. Simply adding it as a member is insufficient for reliable checks of other users. Telegram documents this requirement for [getChatMember](https://core.telegram.org/bots/api#getchatmember).
+2. Keep the existing `TELEGRAM_BOT_TOKEN` repository secret. The personal responder needs no Groq, Spotify, weather, or sports credentials.
+3. Confirm that the **Member Report Requests** workflow is enabled on the repository's default branch.
+4. Open the bot privately and send `/start`. Existing members receive the prepared digest; others get the join prompt. Response time depends on the next scheduled worker run.
+
+The first push of this feature to the default branch builds a snapshot after the tests pass. You can also refresh it through **Daily Telegram Report Bot → Run workflow → `dry_run: true`**, which makes source requests and updates the snapshot without posting to Telegram. Regular daily generation remains scheduled for **07:00 Tehran**.
+
+### Membership settings
+
+| Setting | Default | Where to configure |
+| :--- | :--- | :--- |
+| `MEMBERSHIP_CHANNEL_ID` | `@sentencedIntoMusic` | Actions variable, or environment variable locally. Independent of the daily delivery destination. |
+| `CHANNEL_JOIN_URL` | Derived from the public channel username | Optional Actions variable or secret. For a private channel, use its numeric ID above and provide its HTTPS Telegram invite link here; use a secret for private invites. |
+| `MEMBER_REQUESTS_ENABLED` | Enabled unless set to `false` | Actions variable. Set to `false` to pause request processing while keeping the daily report running. |
+
+The public channel's join button defaults to `https://t.me/sentencedIntoMusic`. Channel owners can change the membership requirement without changing the bot's daily posting destination.
+
+### How it works on GitHub Actions
+
+The [member request workflow](.github/workflows/member_requests.yml) polls Telegram every five minutes, at minutes `02, 07, 12, …, 57`. A run checks webhook status and the bot's channel admin status, downloads the newest `daily-report` artifact from this repository's default branch, and processes a bounded batch of pending private requests. It attempts up to three reports per invocation and limits duplicate report delivery to one per user within that invocation.
+
+Only a validated snapshot no older than 36 hours is served. It contains report text, public image links, a generation timestamp, and a schema version; no recipient IDs or credentials are exported. On-demand reports reuse this content, including its original weather and news timestamps. They do not rerun the model or download audio files; listening links and artwork remain included.
+
+Telegram keeps the update cursor: the worker confirms only the processed prefix using `getUpdates(offset=...)`. Requests beyond the batch or time limit remain pending for the next invocation. A delivery failure for one user does not trap the queue. If a process stops after delivery but before confirmation, a later run may repeat that request; multi-message delivery is not transactional.
+
+**This is delayed, small-audience delivery.** GitHub's [scheduled workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule) may run late, so five minutes is a polling interval rather than a response-time guarantee. A backlog can take several runs, and Telegram retains pending updates for at most 24 hours. Use exactly one consumer for this bot token; an existing webhook is detected and left untouched. The workflow uses repository read permissions plus `actions: read` to retrieve the report artifact.
+
+At this interval there are up to 288 worker runs per day. For private repositories, account for your plan's Actions allowance; see [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions). For immediate responses or a larger audience, move request handling to a persistent worker or webhook service.
+
+For a local, single-consumer check after exporting the environment:
+
+```bash
+# Build a snapshot without Telegram delivery.
+python -m src.main --dry-run --export-report report-cache/daily-report.json
+
+# Process a bounded batch of real private requests, checking channel membership.
+python -m src.member_bot --report report-cache/daily-report.json
+```
+
+The second command contacts Telegram and replies to pending users. Pause the Actions responder first to prevent concurrent consumers.
 
 ## Under the hood
 
@@ -196,7 +252,9 @@ Telegram delivery has a separate policy: retry only after an explicit HTTP 429 r
 
 ```text
 telegram_daily_bot/
-├── .github/workflows/daily_report.yml  # Schedule, preview, and CI
+├── .github/workflows/
+│   ├── daily_report.yml              # Daily schedule, preview, snapshot export, and CI
+│   └── member_requests.yml           # Five-minute membership-gated request batches
 ├── src/
 │   ├── config.py                     # Environment settings and validation
 │   ├── http_client.py                # Bounded requests, timeouts, and retries
@@ -209,10 +267,13 @@ telegram_daily_bot/
 │   ├── weather.py                    # Current conditions and local forecasts
 │   ├── sports.py                     # Final scores and local calendar filtering
 │   ├── song.py                       # Spotify/iTunes artwork and optional audio
-│   └── main.py                       # Report orchestration and CLI
+│   ├── member_bot.py                 # Membership gate, join buttons, bounded request polling
+│   ├── report_store.py               # Public snapshot schema, freshness, and size checks
+│   └── main.py                       # Report orchestration, snapshot export, and CLI
 ├── tests/
 │   ├── test_bot.py                   # Core offline regression tests
-│   └── test_images.py                # Image provenance and photo delivery tests
+│   ├── test_images.py                # Image provenance and photo delivery tests
+│   └── test_membership.py            # Access control, routing, snapshots, and update cursors
 ├── .env.example                      # Configuration template
 ├── requirements.txt                  # Standard-library core; no third-party packages
 └── requirements-audio.txt            # Optional downloader dependency
@@ -225,7 +286,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 ```
 
-Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media.
+Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media. Membership tests cover denied access, live rechecks, membership API failures, private recipient isolation, join buttons, snapshot freshness, startup admin/webhook checks, and acknowledgement of only processed updates.
 
 To change the editorial voice, edit `src/prompts.py`. To extend educational topics, update `src/insights.py`. To change news sources, update `FEEDS` in `src/news.py` and retain valid source attribution, URLs, and publication dates.
 
@@ -240,11 +301,13 @@ To change the editorial voice, edit `src/prompts.py`. To extend educational topi
 | A photo is missing or rejected | The full text is sent instead; confirm that the image URL is publicly accessible to Telegram. |
 | Optional audio fails | A warning is logged; this alone does not fail the report. |
 | HTTP 401 or 403 | Check credentials, service access, and channel posting permissions. |
+| Membership check fails | Confirm that the bot is an administrator in `MEMBERSHIP_CHANNEL_ID`; access stays closed while verification is unavailable. |
+| Member reports are delayed | Check **Member Report Requests**, Actions availability, and pending request volume. |
 | Groq is unavailable or returns invalid output | A subsequent model or original-content fallback is used; check model settings and quota. |
 
 ### Operating boundaries
 
-- **No persistent state.** Deduplication applies within a run. Running the bot again can send the same material again.
+- **No subscriber database.** Daily generation is stateless. Member requests use a short-lived public report artifact and Telegram's confirmed update cursor. Report deduplication applies within a worker invocation; another `/report` on a later run can return the same snapshot.
 - **Delivery is partial by nature.** Several messages form a report; some may arrive before a later message fails.
 - **Sports depend on coverage.** Available results reflect your Sportradar trial access and its data coverage. The old volleyball variable has been removed because no volleyball collector was implemented.
 - **Images depend on their sources.** Some stories and tracks have no usable artwork. Publisher links may expire or block Telegram. A network timeout can leave photo delivery uncertain; the text fallback may repeat a caption that already arrived.

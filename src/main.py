@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 import tempfile
 from src import config, news, song, sports, telegram_sender, weather, writer
+from src.report_store import save_report
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,8 +18,8 @@ def _collect(name, function):
         return None
 
 
-def run(dry_run=False):
-    config.validate(for_delivery=not dry_run)
+def build_report():
+    """Build public report content once for channel delivery and member requests."""
     now = datetime.now(config.LOCAL_TZ)
     stamp = now.strftime("%Y/%m/%d · %H:%M")
     # Only independent data collection is concurrent. Editorial calls and delivery stay ordered.
@@ -68,6 +69,15 @@ def run(dry_run=False):
         for card in music_cards or []:
             add_message(card["text"], card["image_url"])
 
+    return {"version": 1, "generated_at": now.isoformat(), "messages": messages}, track
+
+
+def run(dry_run=False, *, export_report=None):
+    config.validate(for_delivery=not dry_run)
+    snapshot, track = build_report()
+    if export_report:
+        save_report(export_report, snapshot)
+    messages = snapshot["messages"]
     failed = False
     for message in messages:
         if dry_run:
@@ -96,10 +106,11 @@ def run(dry_run=False):
 def main():
     parser = argparse.ArgumentParser(description="Generate a source-linked Persian daily digest")
     parser.add_argument("--dry-run", action="store_true", help="Print report without Telegram delivery or audio downloads")
+    parser.add_argument("--export-report", metavar="PATH", help="Save a public JSON report snapshot for member requests")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        return run(dry_run=args.dry_run)
+        return run(dry_run=args.dry_run, export_report=args.export_report)
     except ValueError as exc:
         LOGGER.error("Configuration error: %s", exc)
         return 2

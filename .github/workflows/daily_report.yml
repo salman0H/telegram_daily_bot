@@ -37,19 +37,20 @@ jobs:
           python -m unittest discover -s tests -v
 
   execute-bot:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
       ENABLE_AUDIO_DOWNLOAD: ${{ vars.ENABLE_AUDIO_DOWNLOAD || 'false' }}
+      DRY_RUN: ${{ github.event_name == 'push' || inputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install optional audio dependencies
-        if: env.ENABLE_AUDIO_DOWNLOAD == 'true' && inputs.dry_run != true
+        if: env.ENABLE_AUDIO_DOWNLOAD == 'true' && env.DRY_RUN != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
@@ -72,10 +73,17 @@ jobs:
           NEWS_MAX_AGE_HOURS: ${{ vars.NEWS_MAX_AGE_HOURS || '36' }}
           NEWS_PER_CATEGORY: ${{ vars.NEWS_PER_CATEGORY || '2' }}
           GROQ_MODELS: ${{ vars.GROQ_MODELS || 'openai/gpt-oss-120b,llama-3.3-70b-versatile' }}
-          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           if [ "$DRY_RUN" = "true" ]; then
-            python -m src.main --dry-run
+            python -m src.main --dry-run --export-report report-cache/daily-report.json
           else
-            python -m src.main
+            python -m src.main --export-report report-cache/daily-report.json
           fi
+      - name: Publish public report snapshot for member requests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report
+          path: report-cache/daily-report.json
+          retention-days: 2
+          if-no-files-found: ignore

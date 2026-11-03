@@ -1,5 +1,7 @@
 """Telegram delivery without unsafe HTML truncation or blind POST retries."""
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 import logging
 import mimetypes
 import os
@@ -12,6 +14,7 @@ from src.formatting import render, split_message, utf16_length
 from src.news import safe_url
 
 LOGGER = logging.getLogger(__name__)
+_TARGET = ContextVar("telegram_delivery_target", default=None)
 _LAST_SEND = 0.0
 MAX_AUDIO_BYTES = 45 * 1024 * 1024
 
@@ -20,8 +23,18 @@ class TelegramError(RuntimeError):
     pass
 
 
+@contextmanager
+def delivery_target(chat_id):
+    """Scope all text, photo, and audio delivery without changing global config."""
+    token = _TARGET.set(str(chat_id))
+    try:
+        yield
+    finally:
+        _TARGET.reset(token)
+
+
 def _resolve_target():
-    target = config.TELEGRAM_CHANNEL_ID or config.TELEGRAM_USER_ID
+    target = _TARGET.get() or config.TELEGRAM_CHANNEL_ID or config.TELEGRAM_USER_ID
     if not target:
         raise TelegramError("Telegram destination is missing")
     return target
@@ -32,10 +45,12 @@ def _post(method, body, content_type, timeout=20):
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/{method}"
     for attempt in range(3):
         # Multiple messages to one chat should not burst above one per second.
-        time.sleep(max(0, 1.05 - (time.monotonic() - _LAST_SEND)))
+        if method in {"sendMessage", "sendPhoto", "sendAudio"}:
+            time.sleep(max(0, 1.05 - (time.monotonic() - _LAST_SEND)))
         request = urllib.request.Request(url, data=body, headers={"Content-Type": content_type})
         try:
-            _LAST_SEND = time.monotonic()
+            if method in {"sendMessage", "sendPhoto", "sendAudio"}:
+                _LAST_SEND = time.monotonic()
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
             if not isinstance(result, dict) or not result.get("ok"):
@@ -62,18 +77,27 @@ def _post(method, body, content_type, timeout=20):
     raise TelegramError("Telegram retry limit reached")
 
 
-def send_message(text):
+def call_api(method, payload=None, timeout=20):
+    result = _post(method, json.dumps(payload or {}).encode(), "application/json", timeout=timeout)
+    if "result" not in result:
+        raise TelegramError(f"Telegram {method} returned no result")
+    return result["result"]
+
+
+def send_message(text, *, reply_markup=None):
     if not text or not text.strip():
         return []
     responses = []
-    for chunk, entities in split_message(text):
-        responses.append(_send_text_chunk(chunk, entities))
+    for index, (chunk, entities) in enumerate(split_message(text)):
+        responses.append(_send_text_chunk(chunk, entities, reply_markup if index == 0 else None))
     return responses
 
 
-def _send_text_chunk(text, entities):
+def _send_text_chunk(text, entities, reply_markup=None):
     payload = {"chat_id": _resolve_target(), "text": text, "entities": entities,
                "link_preview_options": {"is_disabled": True}}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     return _post("sendMessage", json.dumps(payload).encode(), "application/json")
 
 
