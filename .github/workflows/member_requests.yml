@@ -2,7 +2,7 @@ name: Member Report Requests
 
 on:
   schedule:
-    - cron: '2-57/5 * * * *'
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -50,4 +50,4 @@ jobs:
           MEMBERSHIP_CHANNEL_ID: ${{ vars.MEMBERSHIP_CHANNEL_ID || '@sentencedIntoMusic' }}
           CHANNEL_JOIN_URL: ${{ secrets.CHANNEL_JOIN_URL || vars.CHANNEL_JOIN_URL }}
           TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Tehran' }}
-        run: python -m src.member_bot --report report-cache/daily-report.json
+        run: python -m src.member_bot --report report-cache/daily-report.json --listen-seconds 240

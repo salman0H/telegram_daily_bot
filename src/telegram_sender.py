@@ -12,6 +12,7 @@ import uuid
 from src import config
 from src.formatting import render, split_message, utf16_length
 from src.news import safe_url
+from src.media import photo_variants
 
 LOGGER = logging.getLogger(__name__)
 _TARGET = ContextVar("telegram_delivery_target", default=None)
@@ -20,13 +21,15 @@ MAX_AUDIO_BYTES = 45 * 1024 * 1024
 
 
 class TelegramError(RuntimeError):
-    pass
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class RecipientUnavailableError(TelegramError):
     """Telegram forbids delivery: blocked bot, deactivated user, or no chat access."""
     def __init__(self, message, *, chat_id=None):
-        super().__init__(message)
+        super().__init__(message, status_code=403)
         self.chat_id = str(chat_id) if chat_id is not None else None
 
 
@@ -80,7 +83,7 @@ def _post(method, body, content_type, timeout=20):
             if status == 403 and method in {"sendMessage", "sendPhoto", "sendAudio"}:
                 raise RecipientUnavailableError(
                     f"Telegram {method}: recipient unavailable (HTTP 403)", chat_id=_resolve_target()) from None
-            raise TelegramError(f"Telegram {method} failed (HTTP {status})") from None
+            raise TelegramError(f"Telegram {method} failed (HTTP {status})", status_code=status) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             # A lost response may already have been delivered. Do not duplicate it.
             raise TelegramError(f"Telegram {method} failed ({type(exc).__name__}); delivery uncertain") from None
@@ -117,6 +120,22 @@ def _send_photo_chunk(photo_url, caption, entities):
     return _post("sendPhoto", json.dumps(payload).encode(), "application/json", timeout=45)
 
 
+def _send_best_photo(photo_url, caption, entities):
+    variants = photo_variants(photo_url)
+    for index, candidate in enumerate(variants):
+        try:
+            return _send_photo_chunk(candidate, caption, entities)
+        except RecipientUnavailableError:
+            raise
+        except TelegramError as exc:
+            # Only an explicit rejection is safe to retry with a different URL.
+            # A lost response may already have delivered the larger photo.
+            if exc.status_code not in {400, 413, 422} or index == len(variants) - 1:
+                raise
+            LOGGER.info("Larger source image rejected; trying original rendition")
+    raise TelegramError("Photo requires a valid HTTP(S) URL")
+
+
 def send_photo(photo_url, caption=""):
     """Send publisher-hosted artwork by URL, using Telegram's caption entities."""
     photo_url = safe_url(photo_url)
@@ -125,7 +144,7 @@ def send_photo(photo_url, caption=""):
     caption, entities = render(caption)
     if utf16_length(caption) > 1024:
         raise TelegramError("Photo caption exceeds 1024 UTF-16 units")
-    return _send_photo_chunk(photo_url, caption, entities)
+    return _send_best_photo(photo_url, caption, entities)
 
 
 def send_illustrated_message(text, image_url=""):
@@ -136,7 +155,7 @@ def send_illustrated_message(text, image_url=""):
     chunks = iter(split_message(text, limit=1024))
     caption, entities = next(chunks, ("", []))
     try:
-        photo_result = _send_photo_chunk(image_url, caption, entities)
+        photo_result = _send_best_photo(image_url, caption, entities)
     except RecipientUnavailableError:
         raise
     except TelegramError as exc:

@@ -38,9 +38,9 @@ Messages use compact sections and restrained formatting for reading on a phone. 
 
 News photos come from the story's RSS media metadata: image content, thumbnails, or image enclosures. Spotify cards use the selected album's cover; iTunes cards use the artwork attached to that specific chart entry. The model never chooses or invents image URLs.
 
-Each story and track is sent as a separate photo card with its text as the caption. Telegram fetches the publisher-hosted image directly, so photos require no new dependency or API key and work even when audio downloads are disabled. News photos use the resolution supplied by the feed, which may be a thumbnail.
+Each story and track is sent as a separate photo card with its text as the caption. Telegram fetches the publisher-hosted image directly, so photos require no new dependency or API key and work even when audio downloads are disabled. At delivery time, recognized BBC thumbnail URLs request a 1,024-pixel-wide rendition of the same asset, and Apple artwork URLs request a 1,000 × 1,000 rendition. Spotify uses the largest declared album image. Unknown hosts and already larger images are left unchanged. This also improves images referenced by existing cached reports; it does not manufacture detail when the publisher has no larger original.
 
-Captions are split conservatively at 1,024 UTF-16 units. Any remaining text follows in messages with its formatting intact. If an image is absent or its photo request fails, the complete text and source/listening link are sent instead. Photo failure alone does not fail the report when the text fallback succeeds; a subsequent text-delivery failure still does. Preview mode prints image URLs without sending photos.
+Captions are split conservatively at 1,024 UTF-16 units. Any remaining text follows in messages with its formatting intact. If Telegram explicitly rejects a larger rendition, the original source URL is tried. If no image can be sent, the complete text and source/listening link are sent instead. Ambiguous network failures do not trigger a second photo request, and blocked recipients are skipped immediately. Photo failure alone does not fail the report when the text fallback succeeds; a subsequent text-delivery failure still does. Preview mode prints image URLs without sending photos.
 
 Images must be publicly reachable by Telegram and satisfy its [photo requirements](https://core.telegram.org/bots/api#sendphoto). The bot does not fetch article pages, search for substitute pictures, or generate posters.
 
@@ -223,11 +223,13 @@ The public channel's join button defaults to `https://t.me/sentencedIntoMusic`. 
 
 ### How it works on GitHub Actions
 
-The [member request workflow](.github/workflows/member_requests.yml) polls Telegram every five minutes, at minutes `02, 07, 12, …, 57`. A run checks webhook status and the bot's channel admin status, downloads the newest `daily-report` artifact from this repository's default branch, and processes a bounded batch of pending private requests. It attempts up to three reports per invocation and limits duplicate report delivery to one per user within that invocation.
+The [member request workflow](.github/workflows/member_requests.yml) requests a start every five minutes, at the explicit minute list `02, 07, 12, …, 57`. A run checks webhook status and the bot's channel admin status, downloads the newest `daily-report` artifact from this repository's default branch, and keeps receiving requests within a budget of up to 240 seconds. Long polls wait up to 20 seconds and can return as soon as updates arrive. The worker reserves time to finish delivery, attempts up to ten reports per invocation, and limits duplicate report delivery to one per user within that invocation. Membership is queried for incoming report requests; it is not a periodic scan of all channel members.
 
 Only a validated snapshot no older than 36 hours is served. It contains report text, public image links, a generation timestamp, and a schema version; no recipient IDs or credentials are exported. On-demand reports reuse this content, including its original weather and news timestamps. They do not rerun the model or download audio files; listening links and artwork remain included.
 
 Telegram keeps the update cursor: the worker confirms only the processed prefix using `getUpdates(offset=...)`. Requests beyond the batch or time limit remain pending for the next invocation. A delivery failure for one user does not trap the queue. If a process stops after delivery but before confirmation, a later run may repeat that request; multi-message delivery is not transactional.
+
+**GitHub must actually start the worker.** The cron expression is a requested schedule, not an active listener. Keeping a started worker alive reduces idle gaps but cannot make GitHub start a missed or delayed job. If the run history contains only `workflow_dispatch` events, automatic starts have not occurred: confirm that the workflow is enabled on the default branch, inspect Actions run history, and use **Run workflow** as a temporary listener. Worker logs now include processed-update, membership-check, and report-attempt counts without user IDs.
 
 **This is delayed, small-audience delivery.** GitHub's [scheduled workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule) may run late, so five minutes is a polling interval rather than a response-time guarantee. A backlog can take several runs, and Telegram retains pending updates for at most 24 hours. Use exactly one consumer for this bot token; an existing webhook is detected and left untouched. The workflow uses repository read permissions plus `actions: read` to retrieve the report artifact.
 
@@ -240,7 +242,7 @@ For a local, single-consumer check after exporting the environment:
 python -m src.main --dry-run --export-report report-cache/daily-report.json
 
 # Process a bounded batch of real private requests, checking channel membership.
-python -m src.member_bot --report report-cache/daily-report.json
+python -m src.member_bot --report report-cache/daily-report.json --listen-seconds 240
 ```
 
 The second command contacts Telegram and replies to pending users. Pause the Actions responder first to prevent concurrent consumers.
@@ -280,6 +282,7 @@ telegram_daily_bot/
 │   ├── insights.py                   # Educational seed notes and references
 │   ├── writer.py                     # Validated editing and source-paired news cards
 │   ├── formatting.py                 # Telegram entities and UTF-16 message splitting
+│   ├── media.py                      # Larger source-CDN renditions with original fallback
 │   ├── telegram_sender.py            # Text, photo cards, and audio delivery
 │   ├── weather.py                    # Current conditions and local forecasts
 │   ├── sports.py                     # Final scores and local calendar filtering
@@ -291,7 +294,8 @@ telegram_daily_bot/
 │   ├── test_bot.py                   # Core offline regression tests
 │   ├── test_images.py                # Image provenance and photo delivery tests
 │   ├── test_membership.py            # Access control, routing, snapshots, and update cursors
-│   └── test_controls.py              # Global pause and blocked-recipient isolation
+│   ├── test_controls.py              # Global pause and blocked-recipient isolation
+│   └── test_quality_and_polling.py    # Image renditions and late-arriving requests
 ├── .env.example                      # Configuration template
 ├── requirements.txt                  # Standard-library core; no third-party packages
 └── requirements-audio.txt            # Optional downloader dependency
@@ -304,7 +308,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 ```
 
-Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media. Membership tests cover denied access, live rechecks, membership API failures, private recipient isolation, join buttons, snapshot freshness, startup admin/webhook checks, and acknowledgement of only processed updates. Control tests verify that pausing prevents API calls and that a blocked recipient cannot stop delivery to the next user.
+Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media. Membership tests cover denied access, live rechecks, membership API failures, private recipient isolation, join buttons, snapshot freshness, startup admin/webhook checks, and acknowledgement of only processed updates. Control tests verify that pausing prevents API calls and that a blocked recipient cannot stop delivery to the next user. Quality and polling tests cover larger source URLs, fallback to the original image, no duplicate photo retries on ambiguous failures, and requests arriving after an initial empty poll.
 
 To change the editorial voice, edit `src/prompts.py`. To extend educational topics, update `src/insights.py`. To change news sources, update `FEEDS` in `src/news.py` and retain valid source attribution, URLs, and publication dates.
 

@@ -104,7 +104,7 @@ class BlockedQueueTests(unittest.TestCase):
                     return {"update_id": update_id, "message": {"chat": {"id": user, "type": "private"},
                                                                "from": {"id": user}, "text": "/report"}}
                 updates = [update(42, 10), update(42, 11), update(99, 12)]
-                def api(method, payload):
+                def api(method, payload, **kwargs):
                     if method == "getUpdates":
                         return updates if "offset" not in payload else []
                     return {"status": "member"}

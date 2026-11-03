@@ -8,6 +8,7 @@ from src import config
 from src.http_client import request_json
 from src.news import safe_url
 from src.writer import plain_field
+from src.media import image_area
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def get_trending_song():
         link = safe_url(track.get("external_urls", {}).get("spotify", ""))
         if not link:
             return None
-        image_url = next((url for image in (album.get("images") or [])
+        image_url = next((url for image in sorted(album.get("images") or [], key=image_area, reverse=True)
                           if isinstance(image, dict) and (url := safe_url(image.get("url", "")))), "")
         return {"title": plain_field(track["name"], 160),
                 "artist": plain_field(", ".join(artist["name"] for artist in track["artists"]), 160), "link": link, "image_url": image_url}

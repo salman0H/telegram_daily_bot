@@ -33,12 +33,14 @@ def is_member(member):
 
 
 class MemberBot:
-    def __init__(self, report=None, *, clock=time.monotonic, max_reports=3, runtime_seconds=240):
+    def __init__(self, report=None, *, clock=time.monotonic, max_reports=10, runtime_seconds=240):
         self.report = validate_report(report) if report is not None else None
         self.clock = clock
         self.deadline = clock() + runtime_seconds
         self.max_reports = max_reports
         self.report_count = 0
+        self.membership_checks = 0
+        self.updates_processed = 0
         self.served = set()
         self.unreachable = set()
         self.username = ""
@@ -63,6 +65,7 @@ class MemberBot:
             telegram.send_message(text, reply_markup=keyboard)
 
     def _require_membership(self, user_id):
+        self.membership_checks += 1
         try:
             member = telegram.call_api("getChatMember", {"chat_id": config.MEMBERSHIP_CHANNEL_ID, "user_id": user_id})
         except telegram.TelegramError:
@@ -135,39 +138,64 @@ class MemberBot:
         else:
             self._send(user_id, "برای دریافت آخرین گزارش، /report را بفرستید یا دکمهٔ زیر را بزنید. دریافت گزارش نیازمند عضویت در کانال است.", REPORT_BUTTON)
 
-    def process_pending(self):
+    def process_pending(self, *, listen_seconds=0):
         if not config.BOT_ENABLED:
             LOGGER.info("Bot is paused (BOT_ENABLED=false)")
             return
+        if not 0 <= listen_seconds <= 240:
+            raise ValueError("listen_seconds must be between 0 and 240")
         self.check_setup()
-        payload = {"limit": 100, "timeout": 0, "allowed_updates": ALLOWED_UPDATES}
-        updates = telegram.call_api("getUpdates", payload)
-        if not isinstance(updates, list):
-            raise telegram.TelegramError("Invalid getUpdates result")
-        for update in updates:
-            if self.report_count >= self.max_reports or self.clock() >= self.deadline - 30:
+        listening = listen_seconds > 0
+        stop_at = min(self.deadline, self.clock() + listen_seconds) if listening else self.deadline
+        if listening:
+            self.deadline = stop_at
+        offset = None
+        LOGGER.info("Processing requests; listen window: %s seconds", listen_seconds)
+        while True:
+            remaining = stop_at - self.clock()
+            timeout = min(20, max(0, int(remaining - 30))) if listening else 0
+            payload = {"limit": 100, "timeout": timeout, "allowed_updates": ALLOWED_UPDATES}
+            if offset is not None:
+                payload["offset"] = offset
+            updates = telegram.call_api("getUpdates", payload, timeout=timeout + 20)
+            if not isinstance(updates, list):
+                raise telegram.TelegramError("Invalid getUpdates result")
+            for update in updates:
+                if self.report_count >= self.max_reports or self.clock() >= stop_at - 30:
+                    break
+                if (not isinstance(update, dict) or not isinstance(update.get("update_id"), int)
+                        or isinstance(update["update_id"], bool)):
+                    raise telegram.TelegramError("Invalid Telegram update identifier")
+                try:
+                    self.handle_update(update)
+                except telegram.RecipientUnavailableError as exc:
+                    if exc.chat_id is not None:
+                        self.unreachable.add(exc.chat_id)
+                    LOGGER.info("Recipient unavailable; request skipped")
+                except telegram.TelegramError as exc:
+                    LOGGER.warning("Request delivery failed: %s", exc)
+                offset = update["update_id"] + 1
+                self.updates_processed += 1
+                # Confirm only the processed prefix; further updates stay queued.
+                telegram.call_api("getUpdates", {"limit": 1, "timeout": 0,
+                                                  "allowed_updates": ALLOWED_UPDATES, "offset": offset})
+            if not listening or self.report_count >= self.max_reports or self.clock() >= stop_at - 30:
                 break
-            if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
-                raise telegram.TelegramError("Invalid Telegram update identifier")
-            try:
-                self.handle_update(update)
-            except telegram.RecipientUnavailableError as exc:
-                if exc.chat_id is not None:
-                    self.unreachable.add(exc.chat_id)
-                LOGGER.info("Recipient unavailable; request skipped")
-            except telegram.TelegramError as exc:
-                # Blocked chats or failed deliveries must not trap the entire queue.
-                LOGGER.warning("Request delivery failed: %s", exc)
-            # Confirm only this processed prefix. Any returned next update remains
-            # unconfirmed and will be fetched again by the next Actions invocation.
-            telegram.call_api("getUpdates", {**payload, "offset": update["update_id"] + 1, "limit": 1})
-        LOGGER.info("Member requests processed; reports attempted: %s", self.report_count)
+            if not updates:
+                # Defensive pacing if Telegram returns an empty long poll early.
+                time.sleep(0.25)
+        LOGGER.info("Requests complete: %s updates, %s membership checks, %s reports attempted",
+                    self.updates_processed, self.membership_checks, self.report_count)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Process member-only report requests from Telegram")
     parser.add_argument("--report", default="report-cache/daily-report.json", help="Path to the latest public report snapshot")
+    parser.add_argument("--listen-seconds", type=int, default=0,
+                        help="Keep receiving new requests for up to 240 seconds; default processes one batch")
     args = parser.parse_args()
+    if not 0 <= args.listen_seconds <= 240:
+        parser.error("--listen-seconds must be between 0 and 240")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if not config.BOT_ENABLED:
         LOGGER.info("Bot is paused (BOT_ENABLED=false)")
@@ -178,7 +206,7 @@ def main():
         except (OSError, ValueError) as exc:
             LOGGER.warning("Report snapshot unavailable (%s)", type(exc).__name__)
             report = None
-        MemberBot(report).process_pending()
+        MemberBot(report).process_pending(listen_seconds=args.listen_seconds)
     except (ValueError, telegram.TelegramError) as exc:
         LOGGER.error("Member bot configuration/API error: %s", exc)
         return 1
