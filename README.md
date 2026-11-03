@@ -5,7 +5,7 @@
 ### Your morning, thoughtfully assembled.
 
 Weather for the day. Headlines with sources. Something worth learning.<br>
-A few final scores. A track to press play on.
+Headline photos. Album covers. A track to press play on.
 
 **A Persian daily digest, delivered straight to Telegram.**
 
@@ -27,12 +27,22 @@ Daily Telegram Brief turns a handful of feeds and APIs into a readable morning r
 | Section | What arrives in your chat |
 | :--- | :--- |
 | 🌤 **Your local forecast** | Current conditions and four upcoming three-hour forecast slots, displayed in your timezone. |
-| 📰 **The news desk** | Up to two recent stories per category: world and society, business, arts and culture, science and technology. Each includes its original source link and publication time. |
+| 📰 **The news desk** | Up to two recent stories per category: world and society, business, arts and culture, science and technology. Each story gets its own card with the original source link, publication time, and feed-provided photo when available. |
 | 💡 **Two things to learn** | Short learning cards with an explanation, a practical exercise, and a reference. Topics span engineering, philosophy, books, mythology, and the physics of human movement. |
 | 🏆 **The final whistle** | Up to five final results each for soccer and basketball, covering games that started on the previous local calendar day. |
-| 🎧 **Press play** | A track from a fresh Spotify release, or up to five entries from the US iTunes Store song chart, with listening links. |
+| 🎧 **Press play** | A track from a fresh Spotify release, or up to five entries from the US iTunes Store song chart, with listening links and each track's own cover art when available. |
 
 Messages use compact sections and restrained formatting for reading on a phone. Long reports continue across messages without cutting away content. Telegram entities and UTF-16 offsets keep Persian text, emoji, bold spans, and code aligned.
+
+### Pictures that belong to the story
+
+News photos come from the story's RSS media metadata: image content, thumbnails, or image enclosures. Spotify cards use the selected album's cover; iTunes cards use the artwork attached to that specific chart entry. The model never chooses or invents image URLs.
+
+Each story and track is sent as a separate photo card with its text as the caption. Telegram fetches the publisher-hosted image directly, so photos require no new dependency or API key and work even when audio downloads are disabled. News photos use the resolution supplied by the feed, which may be a thumbnail.
+
+Captions are split conservatively at 1,024 UTF-16 units. Any remaining text follows in messages with its formatting intact. If an image is absent or its photo request fails, the complete text and source/listening link are sent instead. Photo failure alone does not fail the report when the text fallback succeeds; a subsequent text-delivery failure still does. Preview mode prints image URLs without sending photos.
+
+Images must be publicly reachable by Telegram and satisfy its [photo requirements](https://core.telegram.org/bots/api#sendphoto). The bot does not fetch article pages, search for substitute pictures, or generate posters.
 
 ## An editorial workflow with boundaries
 
@@ -47,7 +57,7 @@ flowchart LR
 
 **Sources stay attached.** News comes from four BBC RSS sections. Headlines must have a valid publication date and URL. By default, stories older than 36 hours, dates more than five minutes into the future, and duplicate titles or links within the same run are excluded. Each category is ordered by recency. The current selection offers variety across topics; it uses one news publisher.
 
-**The model has a narrow job.** Groq rewrites titles and short summaries into Persian. The rules in [`src/prompts.py`](src/prompts.py) call for neutral language, preserved attribution and uncertainty, and no invented facts, quotations, statistics, or instructions taken from source text. The application adds categories, source names, timestamps, and original URLs itself.
+**The model has a narrow job.** Groq rewrites titles and short summaries into Persian. The rules in [`src/prompts.py`](src/prompts.py) call for neutral language, preserved attribution and uncertainty, and no invented facts, quotations, statistics, or instructions taken from source text. The application adds categories, source names, timestamps, original URLs, and source-provided image URLs itself.
 
 **Fallbacks are explicit.** Model responses must be JSON with known record IDs and nonempty fields within length limits. Truncated responses and invalid structures are rejected; duplicate records are discarded. If a usable rewrite is unavailable, the original source text appears with a clear label. It may be in English.
 
@@ -169,14 +179,14 @@ The workflow in [`.github/workflows/daily_report.yml`](.github/workflows/daily_r
 | Trigger | Behavior |
 | :--- | :--- |
 | Push or pull request | Compile and run offline tests on Python 3.11 and 3.14. |
-| Daily schedule | Run checks, then generate and deliver the report at **04:30 UTC / 08:00 Tehran**. |
+| Daily schedule | Run checks, then generate and deliver the report at **03:30 UTC / 07:00 Tehran**. |
 | Manual workflow run | Run checks, then deliver; select `dry_run` to print a preview in Actions logs instead. |
 
 To run manually, open **Actions → Daily Telegram Report Bot → Run workflow**.
 
 The workflow has read-only repository permissions, queues overlapping runs for the same ref, and caps the report job at 12 minutes. Audio dependencies are installed only when downloads are enabled and preview mode is off.
 
-The cron expression is `30 4 * * *`. Changing `TIMEZONE` changes report interpretation and display, not the cron schedule. Scheduled execution may be delayed by GitHub Actions.
+The cron expression is `30 3 * * *`. Changing `TIMEZONE` changes report interpretation and display, not the cron schedule. Scheduled execution may be delayed by GitHub Actions.
 
 ## Under the hood
 
@@ -190,17 +200,19 @@ telegram_daily_bot/
 ├── src/
 │   ├── config.py                     # Environment settings and validation
 │   ├── http_client.py                # Bounded requests, timeouts, and retries
-│   ├── news.py                       # RSS collection, freshness, and deduplication
+│   ├── news.py                       # RSS stories, photos, freshness, and deduplication
 │   ├── prompts.py                    # Editorial rules and JSON output contracts
 │   ├── insights.py                   # Educational seed notes and references
-│   ├── writer.py                     # Groq editing, validation, and fallbacks
+│   ├── writer.py                     # Validated editing and source-paired news cards
 │   ├── formatting.py                 # Telegram entities and UTF-16 message splitting
-│   ├── telegram_sender.py            # Message and audio delivery
+│   ├── telegram_sender.py            # Text, photo cards, and audio delivery
 │   ├── weather.py                    # Current conditions and local forecasts
 │   ├── sports.py                     # Final scores and local calendar filtering
-│   ├── song.py                       # Spotify discovery, iTunes charts, optional audio
+│   ├── song.py                       # Spotify/iTunes artwork and optional audio
 │   └── main.py                       # Report orchestration and CLI
-├── tests/test_bot.py                 # Offline regression tests
+├── tests/
+│   ├── test_bot.py                   # Core offline regression tests
+│   └── test_images.py                # Image provenance and photo delivery tests
 ├── .env.example                      # Configuration template
 ├── requirements.txt                  # Standard-library core; no third-party packages
 └── requirements-audio.txt            # Optional downloader dependency
@@ -213,7 +225,7 @@ python -m compileall -q src tests
 python -m unittest discover -s tests -v
 ```
 
-Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation.
+Tests use controlled responses and require no internet access or real credentials. Coverage includes long Persian messages with emoji, entity offsets, Telegram rate limits, malformed model responses, original source links, stale and duplicate news, local sports dates, track selection, and failure isolation. Image tests also cover RSS media extraction, matching each cover to its track, caption overflow, photo-to-text fallback, and previews that never deliver media.
 
 To change the editorial voice, edit `src/prompts.py`. To extend educational topics, update `src/insights.py`. To change news sources, update `FEEDS` in `src/news.py` and retain valid source attribution, URLs, and publication dates.
 
@@ -225,6 +237,7 @@ To change the editorial voice, edit `src/prompts.py`. To extend educational topi
 | A source or collector fails | Its error type is logged without credential-bearing URLs; other sections continue. |
 | No valid recent news | A clear availability message appears instead of generated replacement stories. |
 | A Telegram message fails | Later sections are still attempted; exit code `1` marks the workflow as failed. |
+| A photo is missing or rejected | The full text is sent instead; confirm that the image URL is publicly accessible to Telegram. |
 | Optional audio fails | A warning is logged; this alone does not fail the report. |
 | HTTP 401 or 403 | Check credentials, service access, and channel posting permissions. |
 | Groq is unavailable or returns invalid output | A subsequent model or original-content fallback is used; check model settings and quota. |
@@ -234,6 +247,7 @@ To change the editorial voice, edit `src/prompts.py`. To extend educational topi
 - **No persistent state.** Deduplication applies within a run. Running the bot again can send the same material again.
 - **Delivery is partial by nature.** Several messages form a report; some may arrive before a later message fails.
 - **Sports depend on coverage.** Available results reflect your Sportradar trial access and its data coverage. The old volleyball variable has been removed because no volleyball collector was implemented.
+- **Images depend on their sources.** Some stories and tracks have no usable artwork. Publisher links may expire or block Telegram. A network timeout can leave photo delivery uncertain; the text fallback may repeat a caption that already arrived.
 - **Music labels are specific.** The US iTunes Store chart is not a global Apple Music streaming chart. A Spotify new-release pick is not a claim about trending rank.
 - **Learning repeats deliberately.** The seed catalog is finite; extend it with referenced notes when you want a longer rotation.
 

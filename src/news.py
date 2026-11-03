@@ -23,6 +23,8 @@ def _strip_html(text):
 
 
 def safe_url(value):
+    if not isinstance(value, str):
+        return ""
     try:
         parts = urlsplit(value.strip())
         if parts.scheme not in {"https", "http"} or not parts.hostname or parts.username or parts.password:
@@ -32,6 +34,28 @@ def safe_url(value):
         return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
     except ValueError:
         return ""
+
+
+def _feed_image(entry):
+    """Prefer declared image media, then the feed's thumbnails and enclosures."""
+    namespace = "http://search.yahoo.com/mrss/"
+    content = [element for element in entry.findall(f".//{{{namespace}}}content")
+               if element.get("medium", "").lower() == "image"
+               or element.get("type", "").lower().startswith("image/")]
+    thumbnails = entry.findall(f".//{{{namespace}}}thumbnail")
+    enclosures = [element for element in entry.findall("enclosure")
+                  if element.get("type", "").lower().startswith("image/")]
+    for group in (content, thumbnails, enclosures):
+        def size(element):
+            try:
+                return int(element.get("width", "0")) * int(element.get("height", "0"))
+            except ValueError:
+                return 0
+        for element in sorted(group, key=size, reverse=True):
+            image = safe_url(element.get("url", ""))
+            if image:
+                return image
+    return ""
 
 
 def get_diverse_news(now=None):
@@ -62,7 +86,8 @@ def get_diverse_news(now=None):
                 seen_links.add(link)
                 seen_titles.add(title_key)
                 items.append({"title": title, "summary": _strip_html(entry.findtext("description"))[:1200],
-                              "link": link, "source": source, "published_at": published.isoformat()})
+                              "link": link, "source": source, "published_at": published.isoformat(),
+                              "image_url": _feed_image(entry)})
                 if len(items) == config.NEWS_PER_CATEGORY:
                     break
             if items:

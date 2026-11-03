@@ -23,14 +23,17 @@ def get_trending_song():
                              headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"})
         headers = {"Authorization": f"Bearer {token['access_token']}"}
         albums = request_json("https://api.spotify.com/v1/browse/new-releases?limit=1", headers=headers)
-        album_id = albums["albums"]["items"][0]["id"]
+        album = albums["albums"]["items"][0]
+        album_id = album["id"]
         tracks = request_json(f"https://api.spotify.com/v1/albums/{album_id}/tracks?limit=1", headers=headers)
         track = tracks["items"][0]
         link = safe_url(track.get("external_urls", {}).get("spotify", ""))
         if not link:
             return None
+        image_url = next((url for image in (album.get("images") or [])
+                          if isinstance(image, dict) and (url := safe_url(image.get("url", "")))), "")
         return {"title": plain_field(track["name"], 160),
-                "artist": plain_field(", ".join(artist["name"] for artist in track["artists"]), 160), "link": link}
+                "artist": plain_field(", ".join(artist["name"] for artist in track["artists"]), 160), "link": link, "image_url": image_url}
     except Exception as exc:
         LOGGER.warning("Spotify discovery unavailable (%s)", type(exc).__name__)
         return None
@@ -54,24 +57,41 @@ def download_audio(query, output_dir):
     return None
 
 
-def get_apple_music_top_5():
-    """The iTunes US store chart is not the global Apple Music streaming chart."""
+def get_apple_music_cards():
+    """Pair each US iTunes chart entry with its own publisher-provided artwork."""
     try:
         data = request_json("https://itunes.apple.com/us/rss/topsongs/limit=5/json")
-        entries = data.get("feed", {}).get("entry", [])
-        if not entries:
-            return None
-        blocks = ["🎧 **۵ آهنگ از چارت فروشگاه iTunes آمریکا**"]
-        updated = data.get("feed", {}).get("updated", {}).get("label")
-        if updated:
-            blocks.append(f"به‌روزرسانی منبع: {plain_field(updated, 80)}")
-        for index, entry in enumerate(entries[:5], 1):
+        feed = data.get("feed", {})
+        updated = plain_field(feed.get("updated", {}).get("label", ""), 80)
+        cards = []
+        for index, entry in enumerate(feed.get("entry", [])[:5], 1):
             title = plain_field(entry.get("im:name", {}).get("label", ""), 160)
             artist = plain_field(entry.get("im:artist", {}).get("label", ""), 160)
             link = safe_url(entry.get("id", {}).get("label", ""))
-            if title and link:
-                blocks.append(f"{index}. **{title}**\n{artist}\n{link}")
-        return "\n\n".join(blocks) if len(blocks) > (2 if updated else 1) else None
+            if not title or not link:
+                continue
+            images = entry.get("im:image", [])
+            if not isinstance(images, list):
+                images = []
+            def height(image):
+                try:
+                    return int(image.get("attributes", {}).get("height", 0))
+                except (ValueError, TypeError, AttributeError):
+                    return 0
+            image_url = next((url for image in sorted(images, key=height, reverse=True)
+                              if isinstance(image, dict) and (url := safe_url(image.get("label", "")))), "")
+            text = (f"🎧 **چارت فروشگاه iTunes آمریکا · رتبهٔ {index}**\n\n"
+                    f"**{title}**\n{artist}\n{link}")
+            if updated:
+                text += f"\nبه‌روزرسانی منبع: {updated}"
+            cards.append({"text": text, "image_url": image_url})
+        return cards
     except Exception as exc:
         LOGGER.warning("iTunes chart unavailable (%s)", type(exc).__name__)
-        return None
+        return []
+
+
+def get_apple_music_top_5():
+    """Text-only chart view for callers that do not handle artwork."""
+    cards = get_apple_music_cards()
+    return "\n\n".join(card["text"] for card in cards) if cards else None

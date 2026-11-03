@@ -265,12 +265,12 @@ class MainTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch("src.main.weather.get_mashhad_weather", side_effect=TimeoutError))
         self.stack.enter_context(patch("src.main.news.get_diverse_news", return_value={"جهان": [ITEM]}))
-        self.stack.enter_context(patch("src.main.writer.elaborate_news", return_value="خبر نمونه"))
+        self.stack.enter_context(patch("src.main.writer.prepare_news_cards", return_value=[{"text": "خبر نمونه", "image_url": "https://example.org/news.jpg"}]))
         self.stack.enter_context(patch("src.main.sports.get_sports_results", return_value={}))
         self.stack.enter_context(patch("src.main.song.get_trending_song", return_value=None))
-        self.stack.enter_context(patch("src.main.song.get_apple_music_top_5", return_value="موسیقی"))
+        self.stack.enter_context(patch("src.main.song.get_apple_music_cards", return_value=[{"text": "موسیقی", "image_url": "https://example.org/cover.jpg"}]))
         self.stack.enter_context(patch("src.main.writer.generate_daily_insight", return_value="یادگیری"))
-        self.send = self.stack.enter_context(patch("src.main.telegram_sender.send_message"))
+        self.send = self.stack.enter_context(patch("src.main.telegram_sender.send_illustrated_message"))
         self.audio = self.stack.enter_context(patch("src.main.song.download_audio"))
 
     def test_dry_run_without_credentials_never_sends_or_downloads(self):
@@ -282,10 +282,10 @@ class MainTests(unittest.TestCase):
         self.audio.assert_not_called()
 
     def test_delivery_failure_does_not_skip_later_sections(self):
-        self.send.side_effect = [telegram_sender.TelegramError("failed"), [], []]
+        self.send.side_effect = [telegram_sender.TelegramError("failed"), [], [], []]
         with patch.object(config, "TELEGRAM_BOT_TOKEN", "test"), patch.object(config, "TELEGRAM_USER_ID", "123"):
             self.assertEqual(main.run(), 1)
-        self.assertEqual(self.send.call_count, 3)
+        self.assertEqual(self.send.call_count, 4)
 
     def test_missing_delivery_configuration_fails_early(self):
         with patch.object(config, "TELEGRAM_BOT_TOKEN", ""):

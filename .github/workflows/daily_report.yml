@@ -2,7 +2,7 @@ name: Daily Telegram Report Bot
 
 on:
   schedule:
-    - cron: '30 4 * * *' # 08:00 Asia/Tehran (UTC+03:30)
+    - cron: '30 3 * * *' # 07:00 Asia/Tehran (UTC+03:30)
   workflow_dispatch:
     inputs:
       dry_run:

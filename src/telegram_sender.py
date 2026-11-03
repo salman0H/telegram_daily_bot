@@ -1,5 +1,6 @@
 """Telegram delivery without unsafe HTML truncation or blind POST retries."""
 import json
+import logging
 import mimetypes
 import os
 import time
@@ -8,7 +9,9 @@ import urllib.request
 import uuid
 from src import config
 from src.formatting import render, split_message, utf16_length
+from src.news import safe_url
 
+LOGGER = logging.getLogger(__name__)
 _LAST_SEND = 0.0
 MAX_AUDIO_BYTES = 45 * 1024 * 1024
 
@@ -64,9 +67,50 @@ def send_message(text):
         return []
     responses = []
     for chunk, entities in split_message(text):
-        payload = {"chat_id": _resolve_target(), "text": chunk, "entities": entities,
-                   "link_preview_options": {"is_disabled": True}}
-        responses.append(_post("sendMessage", json.dumps(payload).encode(), "application/json"))
+        responses.append(_send_text_chunk(chunk, entities))
+    return responses
+
+
+def _send_text_chunk(text, entities):
+    payload = {"chat_id": _resolve_target(), "text": text, "entities": entities,
+               "link_preview_options": {"is_disabled": True}}
+    return _post("sendMessage", json.dumps(payload).encode(), "application/json")
+
+
+def _send_photo_chunk(photo_url, caption, entities):
+    payload = {"chat_id": _resolve_target(), "photo": photo_url,
+               "caption": caption, "caption_entities": entities}
+    return _post("sendPhoto", json.dumps(payload).encode(), "application/json", timeout=45)
+
+
+def send_photo(photo_url, caption=""):
+    """Send publisher-hosted artwork by URL, using Telegram's caption entities."""
+    photo_url = safe_url(photo_url)
+    if not photo_url:
+        raise TelegramError("Photo requires a valid HTTP(S) URL")
+    caption, entities = render(caption)
+    if utf16_length(caption) > 1024:
+        raise TelegramError("Photo caption exceeds 1024 UTF-16 units")
+    return _send_photo_chunk(photo_url, caption, entities)
+
+
+def send_illustrated_message(text, image_url=""):
+    """Use a photo card when available, preserving all text on overflow or failure."""
+    image_url = safe_url(image_url)
+    if not image_url:
+        return send_message(text)
+    chunks = iter(split_message(text, limit=1024))
+    caption, entities = next(chunks, ("", []))
+    try:
+        photo_result = _send_photo_chunk(image_url, caption, entities)
+    except TelegramError as exc:
+        LOGGER.warning("Photo unavailable; sending text instead: %s", exc)
+        return send_message(text)
+    responses = [photo_result]
+    # Keep continuation outside the photo fallback: already-delivered text must
+    # never be replayed when only a later continuation fails.
+    for chunk, chunk_entities in chunks:
+        responses.append(_send_text_chunk(chunk, chunk_entities))
     return responses
 
 

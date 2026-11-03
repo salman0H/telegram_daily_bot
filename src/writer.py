@@ -6,6 +6,7 @@ from datetime import datetime
 from src import config
 from src.http_client import request_json
 from src.insights import INSIGHTS
+from src.news import safe_url
 from src.prompts import SYSTEM_PROMPT, NEWS_PROMPT, INSIGHT_PROMPT
 
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +73,8 @@ def _source_line(item):
     return f"منبع: {plain_field(item.get('source', ''), 80)}{stamp}\n{item['link']}"
 
 
-def elaborate_news(news_data):
+def prepare_news_cards(news_data):
+    """Return one card per story, retaining its source-owned image association."""
     originals, categories = {}, {}
     for category, items in news_data.items():
         for item in items:
@@ -80,15 +82,14 @@ def elaborate_news(news_data):
             originals[key] = item
             categories.setdefault(category, []).append(key)
     if not originals:
-        return "خبر تازهٔ دارای تاریخ معتبر در بازهٔ تعیین‌شده دریافت نشد."
+        return []
     # Only source text enters the model; URLs and categories are rendered locally.
     data = [{"id": key, "title": item["title"], "summary": item.get("summary", "")}
             for key, item in originals.items()]
     records = _call_groq(NEWS_PROMPT + json.dumps(data, ensure_ascii=False))
     edited = _validated_records(records, originals, {"title": 100, "summary": 360})
-    blocks = ["خلاصهٔ خبرها بر پایهٔ خوراک منبع؛ بدون تأیید مستقل."]
+    cards = []
     for category, keys in categories.items():
-        blocks.append(f"**{plain_field(category)}**")
         for key in keys:
             original = originals[key]
             item = edited.get(key)
@@ -98,8 +99,18 @@ def elaborate_news(news_data):
                 body = (f"▪️ **{plain_field(original['title'], 240)}**\n"
                         f"{plain_field(original.get('summary', ''), 500)}\n"
                         "(متن اصلی منبع؛ بازنویسی فارسی در دسترس نیست)")
-            blocks.append(f"{body}\n{_source_line(original)}")
-    return "\n\n".join(blocks)
+            cards.append({"text": f"📰 **{plain_field(category)}**\n\n{body}\n{_source_line(original)}",
+                          "image_url": safe_url(original.get("image_url", ""))})
+    return cards
+
+
+def elaborate_news(news_data):
+    """Text-only view retained for integrations that consume the full digest."""
+    cards = prepare_news_cards(news_data)
+    if not cards:
+        return "خبر تازهٔ دارای تاریخ معتبر در بازهٔ تعیین‌شده دریافت نشد."
+    return "خلاصهٔ خبرها بر پایهٔ خوراک منبع؛ بدون تأیید مستقل.\n\n" + "\n\n".join(
+        card["text"] for card in cards)
 
 
 def generate_daily_insight(now=None):
