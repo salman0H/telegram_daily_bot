@@ -1,6 +1,7 @@
 """Music discovery. Downloads are optional and confined to a temporary directory."""
 import base64
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
 from urllib.parse import urlencode
@@ -96,3 +97,53 @@ def get_apple_music_top_5():
     """Text-only chart view for callers that do not handle artwork."""
     cards = get_apple_music_cards()
     return "\n\n".join(card["text"] for card in cards) if cards else None
+
+
+def get_new_music_cards(now=None, exclude_links=()):
+    """Five recent releases found in the US iTunes chart, with verified dates."""
+    now = now or datetime.now(config.LOCAL_TZ)
+    cutoff = now.date() - timedelta(days=30)
+    try:
+        data = request_json("https://itunes.apple.com/us/rss/topsongs/limit=100/json")
+        candidates, seen_links, seen_tracks = [], set(exclude_links), set()
+        for entry in data.get("feed", {}).get("entry", []):
+            try:
+                published = datetime.fromisoformat(entry.get("im:releaseDate", {}).get("label", "").replace("Z", "+00:00"))
+                if published.tzinfo is None or not cutoff <= published.astimezone(config.LOCAL_TZ).date() <= now.date() or published > now:
+                    continue
+            except (ValueError, TypeError):
+                continue
+            title = plain_field(entry.get("im:name", {}).get("label", ""), 160)
+            artist = plain_field(entry.get("im:artist", {}).get("label", ""), 160)
+            link = safe_url(entry.get("id", {}).get("label", ""))
+            key = (title.casefold(), artist.casefold())
+            if not title or not artist or not link or link in seen_links or key in seen_tracks:
+                continue
+            images = entry.get("im:image") or []
+            def height(image):
+                try:
+                    return int(image.get("attributes", {}).get("height", 0))
+                except (AttributeError, TypeError, ValueError):
+                    return 0
+            image_url = next((url for image in sorted(images, key=height, reverse=True)
+                              if isinstance(image, dict) and (url := safe_url(image.get("label", "")))), "")
+            candidates.append((published, title, artist, link, image_url))
+            seen_links.add(link)
+            seen_tracks.add(key)
+        candidates.sort(key=lambda item: (item[0], item[3]), reverse=True)
+        if not candidates:
+            return []
+        # A stable source pool yields consecutive groups of five on successive days.
+        # No permanent history is stored, so changes to the pool can cause repeats.
+        offset = (now.date().toordinal() * 5) % len(candidates)
+        selected = (candidates[offset:] + candidates[:offset])[:5]
+        cards = []
+        for index, (published, title, artist, link, image_url) in enumerate(selected, 1):
+            text = (f"🆕 **انتشارهای تازه · پیشنهاد {index}**\n\n**{title}**\n"
+                    f"👤 {artist}\n📅 تاریخ انتشار: {published.date():%Y/%m/%d}\n{link}\n"
+                    "منبع: iTunes آمریکا · منتشرشده در ۳۰ روز اخیر")
+            cards.append({"text": text, "image_url": image_url})
+        return cards
+    except Exception as exc:
+        LOGGER.warning("Recent music discovery unavailable (%s)", type(exc).__name__)
+        return []

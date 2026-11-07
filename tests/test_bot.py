@@ -267,6 +267,7 @@ class MainTests(unittest.TestCase):
         self.stack.enter_context(patch("src.main.news.get_diverse_news", return_value={"جهان": [ITEM]}))
         self.stack.enter_context(patch("src.main.writer.prepare_news_cards", return_value=[{"text": "خبر نمونه", "image_url": "https://example.org/news.jpg"}]))
         self.stack.enter_context(patch("src.main.sports.get_sports_results", return_value={}))
+        self.stack.enter_context(patch("src.main.song.get_new_music_cards", return_value=[]))
         self.stack.enter_context(patch("src.main.song.get_trending_song", return_value=None))
         self.stack.enter_context(patch("src.main.song.get_apple_music_cards", return_value=[{"text": "موسیقی", "image_url": "https://example.org/cover.jpg"}]))
         self.stack.enter_context(patch("src.main.writer.generate_daily_insight", return_value="یادگیری"))

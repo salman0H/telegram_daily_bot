@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import logging
+import re
 import tempfile
 from src import config, news, song, sports, telegram_sender, weather, writer
 from src.report_store import save_report
@@ -60,6 +61,7 @@ def build_report():
                 sections.append(f"**{label}**\n" + "\n".join(f"▫️ {writer.plain_field(match)}" for match in matches))
         sections.append("منبع: Sportradar · حداکثر ۵ بازی از هر رشته")
         add_message("\n\n".join(sections))
+    music_start = len(messages)
     track = data["song"]
     if track:
         music_text = f"🎵 **پیشنهاد از انتشارهای تازه**\n\n**{track['title']}**\n{track['artist']}\n{track['link']}\nمنبع: Spotify"
@@ -68,6 +70,12 @@ def build_report():
         music_cards = _collect("music chart", song.get_apple_music_cards)
         for card in music_cards or []:
             add_message(card["text"], card["image_url"])
+
+    existing_music_links = {link for card in messages[music_start:]
+                            for link in re.findall(r"https?://[^\s]+", card["text"])}
+    fresh_cards = _collect("new releases", lambda: song.get_new_music_cards(exclude_links=existing_music_links))
+    for card in fresh_cards or []:
+        add_message(card["text"], card["image_url"])
 
     return {"version": 1, "generated_at": now.isoformat(), "messages": messages}, track
 

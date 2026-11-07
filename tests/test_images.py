@@ -161,6 +161,7 @@ class ReportImageTests(unittest.TestCase):
                                                        "image_url": "https://example.org/cover.jpg"})):
             self.stack.enter_context(patch(f"src.main.{name}", return_value=result))
         self.send = self.stack.enter_context(patch("src.main.telegram_sender.send_illustrated_message"))
+        self.stack.enter_context(patch("src.main.song.get_new_music_cards", return_value=[]))
         self.download = self.stack.enter_context(patch("src.main.song.download_audio"))
         self.stack.enter_context(patch.object(config, "ENABLE_AUDIO_DOWNLOAD", False))
         self.stack.enter_context(patch.object(config, "TELEGRAM_BOT_TOKEN", "test"))

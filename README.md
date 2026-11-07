@@ -44,6 +44,12 @@ Captions are split conservatively at 1,024 UTF-16 units. Any remaining text foll
 
 Images must be publicly reachable by Telegram and satisfy its [photo requirements](https://core.telegram.org/bots/api#sendphoto). The bot does not fetch article pages, search for substitute pictures, or generate posters.
 
+### Five recent releases, every daily report
+
+An additional **five recent releases** section selects songs with a valid release timestamp in the last 30 days from the US iTunes top-100 feed. Each card includes the artist, release date, cover art, and listening link. It works without Spotify credentials and is included in the saved member report.
+
+Existing music recommendations remain included. Tracks already featured in that report are excluded from the additional selection, and duplicate titles/artists and links are filtered. A date-based rotation changes the group daily when the candidate pool is stable. The source is a chart-filtered selection, not a complete catalog of all newly released music. No permanent listening history is stored, so changing source pools can cause repeats across days. If fewer than five valid recent tracks are available, only available entries are shown; old or undated tracks are never presented as new.
+
 ## An editorial workflow with boundaries
 
 ```mermaid
