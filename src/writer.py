@@ -7,6 +7,7 @@ from src import config
 from src.http_client import request_json
 from src.insights import INSIGHTS
 from src.news import safe_url
+from src.persian import normalize_prose
 from src.prompts import SYSTEM_PROMPT, NEWS_PROMPT, INSIGHT_PROMPT
 
 LOGGER = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 def plain_field(value, limit=500):
     if not isinstance(value, str):
         return ""
-    value = re.sub(r"<[^>]*>", "", value)
+    value = normalize_prose(re.sub(r"<[^>]*>", "", value))
     value = re.sub(r"https?://\S+", "", value)
     return re.sub(r"\s+", " ", value.replace("*", "").replace("`", "").replace("\u200b", "")).strip()[:limit]
 

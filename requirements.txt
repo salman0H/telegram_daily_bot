@@ -1,2 +1,2 @@
-# Core report and tests use only Python's standard library (Python 3.11+).
-# Optional music downloads: pip install -r requirements-audio.txt
+# Lightweight Persian date and character utilities (MIT).
+persiantools==6.2.0

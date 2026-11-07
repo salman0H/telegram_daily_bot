@@ -7,6 +7,8 @@ import re
 import tempfile
 from src import config, news, song, sports, telegram_sender, weather, writer
 from src.report_store import save_report
+from src.persian import local_stamp
+from src import persian_content
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,11 +24,12 @@ def _collect(name, function):
 def build_report():
     """Build public report content once for channel delivery and member requests."""
     now = datetime.now(config.LOCAL_TZ)
-    stamp = now.strftime("%Y/%m/%d · %H:%M")
+    stamp = local_stamp(now)
     # Only independent data collection is concurrent. Editorial calls and delivery stay ordered.
     collectors = {"weather": weather.get_mashhad_weather, "news": news.get_diverse_news,
                   "sports": sports.get_sports_results, "song": song.get_trending_song,
-                  "insight": writer.generate_daily_insight}
+                  "insight": writer.generate_daily_insight,
+                  "calendar": persian_content.get_calendar_card, "poetry": lambda: persian_content.get_poetry_card(now)}
     with ThreadPoolExecutor(max_workers=5) as pool:
         futures = {name: pool.submit(_collect, name, function) for name, function in collectors.items()}
         data = {name: future.result() for name, future in futures.items()}
@@ -35,6 +38,8 @@ def build_report():
     def add_message(text, image_url=""):
         messages.append({"text": text, "image_url": image_url})
 
+    if data["calendar"]:
+        add_message(data["calendar"]["text"])
     weather_data = data["weather"]
     if weather_data:
         current = weather_data["current"]
@@ -61,6 +66,8 @@ def build_report():
                 sections.append(f"**{label}**\n" + "\n".join(f"▫️ {writer.plain_field(match)}" for match in matches))
         sections.append("منبع: Sportradar · حداکثر ۵ بازی از هر رشته")
         add_message("\n\n".join(sections))
+    if data["poetry"]:
+        add_message(data["poetry"]["text"])
     music_start = len(messages)
     track = data["song"]
     if track:

@@ -10,7 +10,7 @@ Headline photos. Album covers. A track to press play on.
 **A Persian daily digest, delivered straight to Telegram.**
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
-![Standard library core](https://img.shields.io/badge/Core-Standard_Library-16A085?style=flat-square)
+![PersianTools](https://img.shields.io/badge/PersianTools-6.2.0-16A085?style=flat-square)
 ![GitHub Actions](https://img.shields.io/badge/Runs_on-GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
 ![Output in Persian](https://img.shields.io/badge/Digest-Persian-8B5CF6?style=flat-square)
 
@@ -20,7 +20,7 @@ Headline photos. Album covers. A track to press play on.
 
 ---
 
-Daily Telegram Brief turns a handful of feeds and APIs into a readable morning routine. It runs locally or on GitHub Actions, keeps no database, and uses only Python's standard library for the core report. AI editing and audio downloads are optional.
+Daily Telegram Brief turns a handful of feeds and APIs into a readable morning routine. It runs locally or on GitHub Actions, keeps no database, and uses Python's standard library plus the small PersianTools package for the core report. AI editing and audio downloads are optional.
 
 ## The daily lineup
 
@@ -49,6 +49,44 @@ Images must be publicly reachable by Telegram and satisfy its [photo requirement
 An additional **five recent releases** section selects songs with a valid release timestamp in the last 30 days from the US iTunes top-100 feed. Each card includes the artist, release date, cover art, and listening link. It works without Spotify credentials and is included in the saved member report.
 
 Existing music recommendations remain included. Tracks already featured in that report are excluded from the additional selection, and duplicate titles/artists and links are filtered. A date-based rotation changes the group daily when the candidate pool is stable. The source is a chart-filtered selection, not a complete catalog of all newly released music. No permanent listening history is stored, so changing source pools can cause repeats across days. If fewer than five valid recent tracks are available, only available entries are shown; old or undated tracks are never presented as new.
+
+## Persian ecosystem integrations
+
+The supplied resource lists were reviewed on **2026-11-07**. They are discovery catalogs, not interchangeable APIs or a promise that every linked service is free. In particular, the API catalog separates free, freemium, paid, and unknown-price services and notes that access from GitHub runners can differ from access inside Iran.
+
+| Resource list | Relevant findings and decision |
+| :--- | :--- |
+| [fffaraz/awesome-persian](https://github.com/fffaraz/awesome-persian) | Archived list of date, font, and language tools. Date localization is useful; browser-only fonts and UI frameworks do not control Telegram's native message font. |
+| [mohebifar/made-in-iran](https://github.com/mohebifar/made-in-iran) | Lists PersianTools and Ganjoor projects. Use maintained Python utilities and the public poetry API; do not install unrelated application frameworks. |
+| [rastikerdar/awesome-persian](https://github.com/rastikerdar/awesome-persian) | Archived list with PersianTools, jdatetime, Khayyam, and Hazm. PersianTools covers this bot's date/character needs; multiple calendar libraries and a full NLP toolkit are unnecessary. |
+| [Hameds/APIs-made-in-Iran](https://github.com/Hameds/APIs-made-in-Iran) | Supplies the calendar and Ganjoor discovery links. Public no-key reads were tested. Paid news APIs, limited free trials, financial/trading APIs, and unrelated payment or SMS services are not integrated. |
+
+### What the bot uses
+
+- **[PersianTools](https://github.com/majiidd/persiantools), MIT:** `persiantools==6.2.0` adds a Jalali date alongside the Gregorian date in report headers. Prose fields normalize Arabic letter variants to Persian characters. URLs, code, and source image identifiers are not passed through that normalization. This is not a spell checker or a factual verifier.
+- **[holidayapi.ir](https://holidayapi.ir):** an optional calendar card shows the local date, provider-reported holiday status, and up to four distinct event descriptions. The provider attributes its data to time.ir. A malformed response or timeout preserves the locally calculated date and displays an availability message; it never invents a holiday status.
+- **[Ganjoor](https://github.com/ganjoor/GanjoorService):** an optional **daily Hafez fal** card presents the full original ghazal, its title, local date, and Ganjoor link. A deterministic permutation of the 495 numbered ghazals keeps the choice fixed within the configured local day and changes it after midnight; the cycle repeats after 495 days. The documented page-by-URL API retrieves that exact poem, and an unexpected source path is rejected. Unexpected author/source paths, incomplete couplets, and oversized responses are rejected. The API's AI-generated interpretations are not used. If unavailable, the card is omitted.
+
+The third-party library license applies to PersianTools code; it does not establish licensing or uptime guarantees for remote providers or their data. No service source code or poem database is copied into the repository. The fal is presented as a literary tradition for reflection; no personal prediction or AI-generated fortune is fabricated. Network checks succeeded from the development environment; GitHub-runner reachability remains provider-dependent.
+
+Both network features use one request attempt and an eight-second timeout. They run during report generation and are included in the shared report snapshot, so personal requests do not call these APIs again. Neither integration needs a new key or sends Telegram user identifiers to providers.
+
+| Actions variable / environment setting | Default | Effect |
+| :--- | :--- | :--- |
+| `ENABLE_PERSIAN_CALENDAR` | `true` | Set `false` to omit the calendar card and its network request. |
+| `ENABLE_PERSIAN_POETRY` | `true` | Set `false` to omit the daily Hafez fal and its network request. |
+
+The daily generation and member workflows install the pinned core requirements; install them locally with `python -m pip install -r requirements.txt` before running the bot or tests. The remaining music sources are unchanged: no suitable documented, free Persian new-release music feed was established from these four catalogs.
+
+### Free APIs catalog review
+
+[Free APIs](https://free-apis.github.io/#/browse) was inspected in its JavaScript browse UI on **2026-11-07**, focusing on weather and music entries. Its [website source](https://github.com/Free-APIs/Free-APIs.github.io) is a directory application, not a replacement service backend. Each candidate still requires a check against its own documentation and current access rules.
+
+- **Ganjoor** is listed in the music-related search results. Its public poem/page reads were tested directly without a key or OAuth, and the existing integration now supplies the daily Hafez fal. Directory-wide authentication badges are not treated as definitive endpoint-level requirements.
+- **Open-Meteo** is a relevant no-key weather candidate. The [official terms](https://open-meteo.com/en/terms) limit the free hosted API to non-commercial use and impose request limits; it is not silently enabled as a universally free replacement for OpenWeather.
+- **Deezer, Jamendo, Discogs, and Genius** appear among music-related entries. Their catalog listing alone does not establish anonymous access, free production usage, Persian coverage, or a reliable recent-release feed. No new adapter for these providers was enabled in this change.
+
+The daily fal is included in the normal report and the shared member snapshot. It replaces the earlier single-couplet card, so reports do not duplicate both sections. A failed source request omits the fal while the remaining report continues. Original ghazals can span multiple Telegram messages using the existing lossless text splitter.
 
 ## An editorial workflow with boundaries
 
@@ -88,7 +126,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-The core requirements file contains no third-party dependencies. The commands above use a POSIX shell.
+The core requirements pin `persiantools==6.2.0` for Jalali dates and Persian character normalization. The commands above use a POSIX shell.
 
 ### 2. Add your settings
 
@@ -289,6 +327,8 @@ telegram_daily_bot/
 │   ├── writer.py                     # Validated editing and source-paired news cards
 │   ├── formatting.py                 # Telegram entities and UTF-16 message splitting
 │   ├── media.py                      # Larger source-CDN renditions with original fallback
+│   ├── persian.py                    # Jalali dates and Persian character normalization
+│   ├── persian_content.py            # Optional calendar and sourced Hafez cards
 │   ├── telegram_sender.py            # Text, photo cards, and audio delivery
 │   ├── weather.py                    # Current conditions and local forecasts
 │   ├── sports.py                     # Final scores and local calendar filtering
@@ -303,7 +343,7 @@ telegram_daily_bot/
 │   ├── test_controls.py              # Global pause and blocked-recipient isolation
 │   └── test_quality_and_polling.py    # Image renditions and late-arriving requests
 ├── .env.example                      # Configuration template
-├── requirements.txt                  # Standard-library core; no third-party packages
+├── requirements.txt                  # Pinned PersianTools dependency (MIT)
 └── requirements-audio.txt            # Optional downloader dependency
 ```
 

@@ -263,6 +263,8 @@ class MainTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch("src.main.persian_content.get_calendar_card", return_value=None))
+        self.stack.enter_context(patch("src.main.persian_content.get_poetry_card", return_value=None))
         self.stack.enter_context(patch("src.main.weather.get_mashhad_weather", side_effect=TimeoutError))
         self.stack.enter_context(patch("src.main.news.get_diverse_news", return_value={"جهان": [ITEM]}))
         self.stack.enter_context(patch("src.main.writer.prepare_news_cards", return_value=[{"text": "خبر نمونه", "image_url": "https://example.org/news.jpg"}]))

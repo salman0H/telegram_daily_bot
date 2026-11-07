@@ -46,6 +46,8 @@ GROQ_MODELS = [m.strip() for m in _env(
     "GROQ_MODELS", "openai/gpt-oss-120b,llama-3.3-70b-versatile"
 ).split(",") if m.strip()]
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+ENABLE_PERSIAN_CALENDAR = _env("ENABLE_PERSIAN_CALENDAR", "true").lower() == "true"
+ENABLE_PERSIAN_POETRY = _env("ENABLE_PERSIAN_POETRY", "true").lower() == "true"
 ENABLE_AUDIO_DOWNLOAD = _env("ENABLE_AUDIO_DOWNLOAD", "false").lower() == "true"
 
 
