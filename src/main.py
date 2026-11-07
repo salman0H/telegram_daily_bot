@@ -8,7 +8,7 @@ import tempfile
 from src import config, news, song, sports, telegram_sender, weather, writer
 from src.report_store import save_report
 from src.persian import local_stamp
-from src import persian_content
+from src import persian_content, vocabulary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ def build_report():
     collectors = {"weather": weather.get_mashhad_weather, "news": news.get_diverse_news,
                   "sports": sports.get_sports_results, "song": song.get_trending_song,
                   "insight": writer.generate_daily_insight,
+                  "vocabulary": lambda: vocabulary.get_vocabulary_cards(now),
                   "calendar": persian_content.get_calendar_card, "poetry": lambda: persian_content.get_poetry_card(now)}
     with ThreadPoolExecutor(max_workers=5) as pool:
         futures = {name: pool.submit(_collect, name, function) for name, function in collectors.items()}
@@ -59,6 +60,8 @@ def build_report():
         add_message(f"📰 **مرور خبرها**\n{stamp}\n\nخبر تازهٔ دارای تاریخ معتبر دریافت نشد؛ ممکن است خوراک‌ها در دسترس نباشند.")
     if data["insight"]:
         add_message(f"💡 **دو نکته برای یادگیری**\n\n{data['insight']}")
+    for card in data["vocabulary"] or []:
+        add_message(card["text"])
     if data["sports"] and any(data["sports"].values()):
         sections = ["🏆 **نتایج نهایی بازی‌های آغازشده در روز گذشته**", f"منطقهٔ زمانی: {config.TIMEZONE}"]
         for label, matches in data["sports"].items():

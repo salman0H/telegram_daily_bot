@@ -128,3 +128,21 @@ def generate_daily_insight(now=None):
         blocks.append(f"🔹 **{item['title']}**\n{item['summary']}\n\n"
                       f"تمرین امروز: {item['action']}\n{_source_line(original)}")
     return "\n\n".join(blocks)
+
+
+def explain_hafez(title, verse, source_summary=''):
+    """Prefer the source's attributed reading; use grounded model prose only as fallback."""
+    summary = plain_field(source_summary, 2400)
+    summary = re.sub(r'^هوش\s*مصنوعی\s*[:：]\s*', '', summary).strip()
+    if len(summary) >= 40 and len(re.findall(r'[\u0600-\u06FF]', summary)) >= 10:
+        if len(summary) > 900:
+            # Prefer complete sentences, otherwise stop at a word boundary.
+            end = max(summary.rfind('。', 0, 900), summary.rfind('.', 0, 900), summary.rfind('؟', 0, 900))
+            summary = summary[:end + 1] if end >= 400 else summary[:900].rsplit(' ', 1)[0] + '…'
+        return summary, 'برداشت ادبی گنجور · تولید هوش مصنوعی'
+    from src.prompts import HAFEZ_EXPLANATION_PROMPT
+    records = _call_groq(HAFEZ_EXPLANATION_PROMPT + json.dumps({'title': title, 'poem': verse}, ensure_ascii=False))
+    accepted = _validated_records(records, {'fal': {}}, {'summary': 800})
+    if 'fal' in accepted and len(re.findall(r'[\u0600-\u06FF]', accepted['fal']['summary'])) >= 10:
+        return accepted['fal']['summary'], 'برداشت ادبی · تولید هوش مصنوعی'
+    return 'توضیح این غزل فعلاً در دسترس نیست؛ می‌توانید غزل را همراه با منبع اصلی بخوانید.', 'توضیح غزل'

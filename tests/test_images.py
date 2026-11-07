@@ -153,6 +153,7 @@ class ReportImageTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch("src.main.vocabulary.get_vocabulary_cards", return_value=[]))
         self.stack.enter_context(patch("src.main.persian_content.get_calendar_card", return_value=None))
         self.stack.enter_context(patch("src.main.persian_content.get_poetry_card", return_value=None))
         for name, result in (("weather.get_mashhad_weather", None), ("news.get_diverse_news", {"جهان": [{}]}),

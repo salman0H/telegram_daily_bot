@@ -6,7 +6,7 @@ from src import config
 from src.http_client import request_json
 from src.persian import local_stamp
 from src.news import safe_url
-from src.writer import plain_field
+from src.writer import plain_field, explain_hafez
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,8 +76,10 @@ def get_poetry_card(now=None):
         verse = "\n\n".join(pairs)
         if len(verse) > 12000:
             raise ValueError("Ghazal exceeds report size budget")
+        explanation, explanation_label = explain_hafez(title, verse, data.get("poemSummary", ""))
         return {"text": f"📜 **فال حافظ روزانه**\n{local_stamp(now).split(' · ')[0]}\n\n"
-                        f"نیت کنید و غزل امروز را بخوانید.\n\n**{title}**\n\n{verse}\n\n"
+                        f"نیت کنید و غزل امروز را بخوانید.\n\n**{title}**\n\n❝\n{verse}\n❞\n\n"
+                        f"✦ **توضیح و برداشت از غزل**\n{explanation}\n\n{explanation_label}\n"
                         f"آیینی ادبی برای تأمل و دل‌گرمی\nمنبع: گنجور\n{source_url}", "image_url": ""}
     except Exception as exc:
         LOGGER.warning("Daily Hafez fal unavailable (%s)", type(exc).__name__)

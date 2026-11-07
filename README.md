@@ -65,7 +65,7 @@ The supplied resource lists were reviewed on **2026-11-07**. They are discovery 
 
 - **[PersianTools](https://github.com/majiidd/persiantools), MIT:** `persiantools==6.2.0` adds a Jalali date alongside the Gregorian date in report headers. Prose fields normalize Arabic letter variants to Persian characters. URLs, code, and source image identifiers are not passed through that normalization. This is not a spell checker or a factual verifier.
 - **[holidayapi.ir](https://holidayapi.ir):** an optional calendar card shows the local date, provider-reported holiday status, and up to four distinct event descriptions. The provider attributes its data to time.ir. A malformed response or timeout preserves the locally calculated date and displays an availability message; it never invents a holiday status.
-- **[Ganjoor](https://github.com/ganjoor/GanjoorService):** an optional **daily Hafez fal** card presents the full original ghazal, its title, local date, and Ganjoor link. A deterministic permutation of the 495 numbered ghazals keeps the choice fixed within the configured local day and changes it after midnight; the cycle repeats after 495 days. The documented page-by-URL API retrieves that exact poem, and an unexpected source path is rejected. Unexpected author/source paths, incomplete couplets, and oversized responses are rejected. The API's AI-generated interpretations are not used. If unavailable, the card is omitted.
+- **[Ganjoor](https://github.com/ganjoor/GanjoorService):** an optional **daily Hafez fal** card presents the full original ghazal, its title, local date, and Ganjoor link. A deterministic permutation of the 495 numbered ghazals keeps the choice fixed within the configured local day and changes it after midnight; the cycle repeats after 495 days. The documented page-by-URL API retrieves that exact poem, and an unexpected source path is rejected. Unexpected author/source paths, incomplete couplets, and oversized responses are rejected. A separate explanation uses the source's AI-generated literary summary when available, explicitly attributed to Ganjoor and labeled as AI-generated. Otherwise Groq may produce a labeled reading based only on the returned ghazal. If both are unavailable, the card states that the explanation is unavailable while preserving the poem. If unavailable, the card is omitted.
 
 The third-party library license applies to PersianTools code; it does not establish licensing or uptime guarantees for remote providers or their data. No service source code or poem database is copied into the repository. The fal is presented as a literary tradition for reflection; no personal prediction or AI-generated fortune is fabricated. Network checks succeeded from the development environment; GitHub-runner reachability remains provider-dependent.
 
@@ -86,7 +86,27 @@ The daily generation and member workflows install the pinned core requirements; 
 - **Open-Meteo** is a relevant no-key weather candidate. The [official terms](https://open-meteo.com/en/terms) limit the free hosted API to non-commercial use and impose request limits; it is not silently enabled as a universally free replacement for OpenWeather.
 - **Deezer, Jamendo, Discogs, and Genius** appear among music-related entries. Their catalog listing alone does not establish anonymous access, free production usage, Persian coverage, or a reliable recent-release feed. No new adapter for these providers was enabled in this change.
 
-The daily fal is included in the normal report and the shared member snapshot. It replaces the earlier single-couplet card, so reports do not duplicate both sections. A failed source request omits the fal while the remaining report continues. Original ghazals can span multiple Telegram messages using the existing lossless text splitter.
+The poem is arranged as separated couplets with a distinct title, date, quotation boundary, explanation heading, and source footer. The daily fal is included in the normal report and the shared member snapshot. It replaces the earlier single-couplet card, so reports do not duplicate both sections. A failed source request omits the fal while the remaining report continues. Original ghazals can span multiple Telegram messages using the existing lossless text splitter.
+
+## Daily English vocabulary review
+
+The owner's supplied table is preserved verbatim in [`data/vocabulary_source.tsv`](data/vocabulary_source.tsv). All **474 rows** are imported into [`data/vocabulary.json`](data/vocabulary.json), which is the runtime word bank. The original row IDs, words/phrases, Persian translations, English definitions, synonyms/equivalents, and grammatical categories are retained. `<br>` placeholders become missing values in JSON; they are never printed as HTML.
+
+Each entry follows a dictionary-style structure: `word`, `translation`, `results` (definition, part of speech, synonyms, examples), `pronunciation`, `syllables`, and `frequency`. The last three fields are `null` when the supplied source contains no value. Missing examples are empty lists. No pronunciation, syllable count, or frequency score is invented. If you later add known examples, IPA (`pronunciation.all`), syllables, or a frequency value to JSON, the renderer can display them. Frequency is shown only as your recorded value, without claiming an unprovided measurement scale.
+
+By default, the report adds **five review cards per day**, stable within the configured local day and rotating through case-insensitively distinct word/phrase labels. The cards contain separated Persian meaning, English definition, grammatical category, and synonym/equivalent sections, plus a short active-recall exercise. This is a shared daily rotation; it does not track individual mastery or implement a personalized spaced-repetition schedule. The source table may contain approximations or incomplete fields, and its meanings are not silently rewritten by a model.
+
+Optional [Free Dictionary API](https://dictionaryapi.dev/) enrichment looks up only the selected single words, with one request attempt and a five-second timeout each. It can supply IPA and a pronunciation-audio link. Example sentences are attached only when the dictionary definition has sufficient lexical overlap with the user's definition; this is a conservative heuristic, not a guarantee of semantic equivalence. Phrases and collocations are not queried as single words. Dictionary metadata never replaces your translation or definition, and missing/failed enrichment leaves the offline learning card available.
+
+The word bank is stored locally in the repository; only an individual selected word is sent to the dictionary provider. No paid dictionary subscription or new API key is needed. Personal member reports reuse the generated snapshot and do not repeat dictionary lookups.
+
+| Actions variable / environment setting | Default | Effect |
+| :--- | :--- | :--- |
+| `ENABLE_VOCABULARY` | `true` | Set `false` to omit the vocabulary section. |
+| `VOCABULARY_PER_DAY` | `5` | Review cards per report, from 1 to 8. |
+| `ENABLE_VOCABULARY_DICTIONARY` | `true` | Set `false` for fully offline word cards with no dictionary requests. |
+
+To update the bank, edit `data/vocabulary.json`; the TSV is the untouched source archive and is not automatically reimported. User-supplied lexical data is not automatically assigned the license of an unrelated API or library.
 
 ## An editorial workflow with boundaries
 

@@ -50,6 +50,11 @@ class CalendarTests(unittest.TestCase):
 
 
 class PoetryTests(unittest.TestCase):
+    def setUp(self):
+        self.groq = patch("src.writer._call_groq", return_value=None)
+        self.groq.start()
+        self.addCleanup(self.groq.stop)
+
     def test_daily_selection_is_stable_and_changes_at_tehran_midnight(self):
         with patch.object(config, 'LOCAL_TZ', __import__('zoneinfo').ZoneInfo('Asia/Tehran')):
             before = datetime(2026, 11, 7, 20, 29, tzinfo=timezone.utc)

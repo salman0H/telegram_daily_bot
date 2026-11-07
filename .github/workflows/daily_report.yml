@@ -64,6 +64,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          ENABLE_VOCABULARY: ${{ vars.ENABLE_VOCABULARY || 'true' }}
+          ENABLE_VOCABULARY_DICTIONARY: ${{ vars.ENABLE_VOCABULARY_DICTIONARY || 'true' }}
+          VOCABULARY_PER_DAY: ${{ vars.VOCABULARY_PER_DAY || '5' }}
           ENABLE_PERSIAN_CALENDAR: ${{ vars.ENABLE_PERSIAN_CALENDAR || 'true' }}
           ENABLE_PERSIAN_POETRY: ${{ vars.ENABLE_PERSIAN_POETRY || 'true' }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
