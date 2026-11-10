@@ -201,7 +201,9 @@ def send_original(card):
     if source:
         payload["reply_markup"] = {"inline_keyboard": [[{"text": "منبع ناسا", "url": source}]]}
     try:
-        return call_api("sendDocument", payload)
+        result = call_api("sendDocument", payload)
+        LOGGER.info("Original image document delivered successfully")
+        return result
     except RecipientUnavailableError:
         raise
     except TelegramError:

@@ -25,3 +25,23 @@ class NasaTests(unittest.TestCase):
         with patch.object(config, 'NEWS_KEYWORDS', ['iran', 'nvidia']):
             self.assertEqual(news.interest_score('Iran and NVIDIA'), 2)
             self.assertEqual(news.interest_score('spiraling'), 0)
+
+class FallbackTests(unittest.TestCase):
+    @patch('src.nasa.request_json', side_effect=TimeoutError)
+    @patch('src.nasa.writer._call_groq', return_value=None)
+    @patch('src.nasa.request_bytes')
+    def test_api_failure_uses_dated_official_article_and_original(self, pages, model, api):
+        day = datetime.now(timezone.utc).date()
+        source = f'https://science.nasa.gov/image-article/apod-{day.year}-{day.strftime("%B").lower()}-{day.day}-space/'
+        original = 'https://assets.science.nasa.gov/content/dam/science/space.jpg'
+        pages.side_effect = [f'<a href="{source}">Today</a>'.encode(),
+            f'<meta property="og:title" content="APOD: {day.strftime("%Y %B")} {day.day} - Space - NASA Science"><a href="{original}"><img></a><strong>Explanation:</strong>Actual source text.</p><th>Credit &amp; Copyright</th><td>Photographer</td>'.encode()]
+        card = nasa.get_card()
+        self.assertEqual(card['document_url'], original)
+        self.assertEqual(card['source_url'], source)
+        self.assertIn('Photographer', card['text'])
+
+    @patch('src.nasa.request_json', side_effect=TimeoutError)
+    @patch('src.nasa.request_bytes', return_value=b'<html>Missing article</html>')
+    def test_broken_fallback_is_omitted_without_guessing_an_image(self, pages, api):
+        self.assertIsNone(nasa.get_card())
