@@ -50,6 +50,7 @@ jobs:
           path: report-cache
       - name: Handle pending Telegram requests
         env:
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           MEMBERSHIP_CHANNEL_ID: ${{ vars.MEMBERSHIP_CHANNEL_ID || '@sentencedIntoMusic' }}
           CHANNEL_JOIN_URL: ${{ secrets.CHANNEL_JOIN_URL || vars.CHANNEL_JOIN_URL }}

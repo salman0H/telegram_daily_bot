@@ -35,7 +35,7 @@ def is_member(member):
 
 class MemberBot:
     def __init__(self, report=None, *, clock=time.monotonic, max_reports=10, runtime_seconds=240,
-                 subscribers=None, checkpoint=None):
+                 subscribers=None, checkpoint=None, admin_reports=False):
         self.report = validate_report(report) if report is not None else None
         self.clock = clock
         self.deadline = clock() + runtime_seconds
@@ -50,6 +50,9 @@ class MemberBot:
         self.subscribers = subscribers
         self.checkpoint = checkpoint or (lambda: None)
         self.reports_completed = 0
+        self.admin_reports = admin_reports
+        self.usernames = {}
+        self.delivery_status = {}
 
     def check_setup(self):
         if not config.TELEGRAM_BOT_TOKEN or not config.MEMBERSHIP_CHANNEL_ID:
@@ -66,6 +69,20 @@ class MemberBot:
         if not isinstance(membership, dict) or membership.get("status") not in {"administrator", "creator"}:
             raise ValueError("The bot must be an administrator in MEMBERSHIP_CHANNEL_ID")
 
+    def _notify_admin(self, user_id, status):
+        admin = config.TELEGRAM_USER_ID
+        if not self.admin_reports or not admin.isascii() or not admin.isdigit() or int(admin) <= 0:
+            return
+        username = self.usernames.get(str(user_id))
+        if not username and self.subscribers is not None:
+            username = self.subscribers.users.get(str(user_id), {}).get('username')
+        label = '@' + username if username else 'ندارد / هنوز ثبت نشده'
+        stamp = datetime.now(config.LOCAL_TZ).strftime('%Y/%m/%d %H:%M')
+        try:
+            self._send(admin, f"👤 گزارش خصوصی استفاده از بات\nID: {user_id}\nUsername: {label}\nوضعیت: {status}\nزمان: {stamp} ({config.TIMEZONE})\nارسال موفق یعنی تأیید API تلگرام؛ به معنی خوانده‌شدن پیام نیست.")
+        except telegram.TelegramError:
+            LOGGER.warning('Admin notification unavailable; user processing continues')
+
     def _send(self, user_id, text, keyboard=None):
         with telegram.delivery_target(user_id):
             telegram.send_message(text, reply_markup=keyboard)
@@ -76,6 +93,7 @@ class MemberBot:
             member = telegram.call_api("getChatMember", {"chat_id": config.MEMBERSHIP_CHANNEL_ID, "user_id": user_id})
         except telegram.TelegramError:
             self._send(user_id, "بررسی عضویت فعلاً ممکن نیست. لطفاً کمی بعد دوباره /report را بفرستید.")
+            self.delivery_status[str(user_id)] = "⚠️ بررسی عضویت ناموفق؛ گزارش ارسال نشد"
             LOGGER.warning("Membership check unavailable; report access denied")
             return False
         if is_member(member):
@@ -85,6 +103,7 @@ class MemberBot:
             [{"text": "✅ عضو شدم؛ بررسی مجدد", "callback_data":
               "subscribe_after_join" if subscribe and self.subscribers is not None else "check_membership"}],
         ]}
+        self.delivery_status[str(user_id)] = "عضو کانال نیست؛ پیام عضویت ارسال شد"
         self._send(user_id, "برای دریافت گزارش، ابتدا عضو کانال شوید. بعد از عضویت، «بررسی مجدد» را بزنید.", keyboard)
         return False
 
@@ -98,9 +117,11 @@ class MemberBot:
             for card in self.report["messages"]:
                 if self.clock() >= self.deadline - 10:
                     self._send(user_id, "ارسال این گزارش کامل نشد. لطفاً چند دقیقه بعد دوباره /report را بفرستید.", REPORT_BUTTON)
+                    self.delivery_status[str(user_id)] = "ارسال ناقص؛ محدودیت زمان اجرا"
                     return False
                 telegram.send_illustrated_message(card["text"], card["image_url"])
                 telegram.send_original(card)
+        self.delivery_status[str(user_id)] = "✅ گزارش کامل ارسال شد"
         self.reports_completed += 1
         if self.subscribers is not None:
             self.subscribers.delivered(user_id, self._report_day())
@@ -119,6 +140,7 @@ class MemberBot:
         if user_id in self.served:
             return
         if not self.report:
+            self.delivery_status[str(user_id)] = "گزارش تازه آماده نیست؛ ارسال نشد"
             self._send(user_id, "گزارش تازه هنوز آماده نیست. لطفاً بعد از آماده شدن گزارش روزانه دوباره /report را بفرستید.", REPORT_BUTTON)
             return
         self.served.add(user_id)
@@ -139,6 +161,8 @@ class MemberBot:
                 break
             if record["last_daily"] == today or int(user_id) in self.served:
                 continue
+            self.usernames[str(user_id)] = record.get("username")
+            self.delivery_status[str(user_id)] = "عضویت تأیید نشد؛ ارسال روزانه انجام نشد"
             try:
                 # Automatic checks do not send repeated join/error prompts every run.
                 self.membership_checks += 1
@@ -146,18 +170,51 @@ class MemberBot:
                     "chat_id": config.MEMBERSHIP_CHANNEL_ID, "user_id": int(user_id)})
                 if not is_member(member):
                     continue
+                self.delivery_status[str(user_id)] = "ارسال روزانه شروع شد؛ تکمیل تأیید نشده"
                 self.report_count += 1
                 self._send(user_id, "☀️ گزارش روزانهٔ شما\nبرای لغو ارسال خودکار: /stop")
                 self._deliver_cards(user_id)
             except telegram.RecipientUnavailableError:
+                self.delivery_status[str(user_id)] = "⛔ کاربر در دسترس نیست؛ اشتراک حذف شد"
                 self.subscribers.remove(user_id)
                 LOGGER.info("Unavailable subscriber removed; continuing with other recipients")
             except telegram.TelegramError as exc:
+                self.delivery_status[str(user_id)] = "⚠️ ارسال روزانه/بررسی عضویت ناموفق"
                 LOGGER.warning("Subscriber delivery/check failed: %s", exc)
             finally:
+                if str(user_id) in self.delivery_status:
+                    self._notify_admin(user_id, self.delivery_status[str(user_id)])
                 self.checkpoint()
 
     def handle_update(self, update):
+        callback = update.get('callback_query')
+        message = callback.get('message') if isinstance(callback, dict) else update.get('message')
+        sender = callback.get('from') if isinstance(callback, dict) else message.get('from') if isinstance(message, dict) else None
+        if not isinstance(message, dict) or not isinstance(sender, dict):
+            return
+        user_id = sender.get('id')
+        chat = message.get('chat', {})
+        if (not isinstance(user_id, int) or isinstance(user_id, bool) or user_id <= 0 or sender.get('is_bot')
+                or not isinstance(chat, dict) or chat.get('type') != 'private' or chat.get('id') != user_id):
+            return
+        username = sender.get('username')
+        username = username if isinstance(username, str) and re.fullmatch(r'[A-Za-z0-9_]{1,32}', username) else None
+        self.usernames[str(user_id)] = username
+        self.delivery_status[str(user_id)] = 'درخواست پردازش شد؛ گزارش جدیدی ارسال نشد'
+        try:
+            self._handle_update(update)
+        except telegram.RecipientUnavailableError:
+            self.delivery_status[str(user_id)] = '⛔ ارسال ممکن نیست؛ بات بلاک شده یا حساب در دسترس نیست'
+            raise
+        except telegram.TelegramError:
+            self.delivery_status[str(user_id)] = '⚠️ ارسال/بررسی ناموفق؛ تحویل کامل تأیید نشد'
+            raise
+        finally:
+            if self.subscribers is not None and str(user_id) in self.subscribers.users:
+                self.subscribers.users[str(user_id)]['username'] = username
+            self._notify_admin(user_id, self.delivery_status[str(user_id)])
+
+    def _handle_update(self, update):
         callback = update.get("callback_query")
         message = callback.get("message") if isinstance(callback, dict) else update.get("message")
         sender = callback.get("from") if isinstance(callback, dict) else (message.get("from") if isinstance(message, dict) else None)
@@ -284,7 +341,7 @@ def main():
         except (OSError, ValueError) as exc:
             LOGGER.warning("Report snapshot unavailable (%s)", type(exc).__name__)
             report = None
-        bot = MemberBot(report, subscribers=subscribers, checkpoint=checkpoint)
+        bot = MemberBot(report, subscribers=subscribers, checkpoint=checkpoint, admin_reports=True)
         bot.check_setup()
         try:
             if args.destination_already_served and subscribers is not None and report:

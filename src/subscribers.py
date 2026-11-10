@@ -4,6 +4,7 @@ from datetime import date
 import hashlib
 import hmac
 import json
+import re
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -85,8 +86,11 @@ class Subscribers:
         for key, value in users.items():
             if not key.isascii() or not key.isdigit() or not 0 < int(key) < 2**52 or str(int(key)) != key:
                 raise ValueError("Invalid subscriber identifier")
-            if not isinstance(value, dict) or set(value) != {"last_daily"}:
+            if not isinstance(value, dict) or not {"last_daily"} <= set(value) or set(value) - {"last_daily", "username"}:
                 raise ValueError("Invalid subscriber record")
+            username = value.get("username")
+            if username is not None and (not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,32}", username)):
+                raise ValueError("Invalid subscriber username")
             day = value["last_daily"]
             if day is not None:
                 if not isinstance(day, str) or date.fromisoformat(day).isoformat() != day:
