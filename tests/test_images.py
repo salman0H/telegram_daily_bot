@@ -153,10 +153,12 @@ class ReportImageTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch("src.main.nasa.get_card", return_value=None))
+        self.stack.enter_context(patch("src.main.hacker_news.get_stories", return_value=[]))
         self.stack.enter_context(patch("src.main.vocabulary.get_vocabulary_cards", return_value=[]))
         self.stack.enter_context(patch("src.main.persian_content.get_calendar_card", return_value=None))
         self.stack.enter_context(patch("src.main.persian_content.get_poetry_card", return_value=None))
-        for name, result in (("weather.get_mashhad_weather", None), ("news.get_diverse_news", {"جهان": [{}]}),
+        for name, result in (("weather.get_mashhad_weather", None), ("news.get_diverse_news", {"جهان": [{"link": "https://example.org/news"}]}),
                              ("sports.get_sports_results", {}), ("writer.generate_daily_insight", "یادگیری"),
                              ("writer.prepare_news_cards", [{"text": "خبر", "image_url": "https://example.org/news.jpg"}]),
                              ("song.get_trending_song", {"title": "Track", "artist": "Artist",

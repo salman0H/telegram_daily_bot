@@ -79,6 +79,9 @@ jobs:
           VOCABULARY_PER_DAY: ${{ vars.VOCABULARY_PER_DAY || '5' }}
           ENABLE_PERSIAN_CALENDAR: ${{ vars.ENABLE_PERSIAN_CALENDAR || 'true' }}
           ENABLE_PERSIAN_POETRY: ${{ vars.ENABLE_PERSIAN_POETRY || 'true' }}
+          NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
+          ENABLE_NASA: ${{ vars.ENABLE_NASA || 'true' }}
+          NEWS_KEYWORDS: ${{ vars.NEWS_KEYWORDS }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
@@ -91,6 +94,8 @@ jobs:
           WEATHER_LON: ${{ vars.WEATHER_LON || '59.6168' }}
           NEWS_MAX_AGE_HOURS: ${{ vars.NEWS_MAX_AGE_HOURS || '36' }}
           NEWS_PER_CATEGORY: ${{ vars.NEWS_PER_CATEGORY || '2' }}
+          ENABLE_HACKER_NEWS: ${{ vars.ENABLE_HACKER_NEWS || 'true' }}
+          HACKER_NEWS_PER_DAY: ${{ vars.HACKER_NEWS_PER_DAY || '3' }}
           GROQ_MODELS: ${{ vars.GROQ_MODELS || 'openai/gpt-oss-120b,llama-3.3-70b-versatile' }}
         run: |
           python -c 'from datetime import datetime; from zoneinfo import ZoneInfo; print("Actual start (Tehran):", datetime.now(ZoneInfo("Asia/Tehran")).isoformat(), "| Scheduled target: 07:00")'

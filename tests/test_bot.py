@@ -263,6 +263,8 @@ class MainTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch("src.main.nasa.get_card", return_value=None))
+        self.stack.enter_context(patch("src.main.hacker_news.get_stories", return_value=[]))
         self.stack.enter_context(patch("src.main.vocabulary.get_vocabulary_cards", return_value=[]))
         self.stack.enter_context(patch("src.main.persian_content.get_calendar_card", return_value=None))
         self.stack.enter_context(patch("src.main.persian_content.get_poetry_card", return_value=None))

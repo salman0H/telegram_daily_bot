@@ -19,7 +19,7 @@ def validate_report(report, now=None):
     if generated.tzinfo is None or not now - MAX_REPORT_AGE <= generated <= now + timedelta(minutes=5):
         raise ValueError("Report snapshot is stale or has a future timestamp")
     messages = report.get("messages")
-    if not isinstance(messages, list) or not 1 <= len(messages) <= 40:
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 48:
         raise ValueError("Invalid report message list")
     cleaned = []
     for message in messages:
@@ -28,7 +28,11 @@ def validate_report(report, now=None):
         text = message.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > 20000:
             raise ValueError("Invalid report text")
-        cleaned.append({"text": text, "image_url": safe_url(message.get("image_url", ""))})
+        card = {"text": text, "image_url": safe_url(message.get("image_url", ""))}
+        for field in ("document_url", "source_url"):
+            if message.get(field):
+                card[field] = safe_url(message[field])
+        cleaned.append(card)
     return {"version": 1, "generated_at": generated.isoformat(), "messages": cleaned}
 
 

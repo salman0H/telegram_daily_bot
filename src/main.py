@@ -8,7 +8,7 @@ import tempfile
 from src import config, news, song, sports, telegram_sender, weather, writer
 from src.report_store import save_report
 from src.persian import local_stamp
-from src import persian_content, vocabulary
+from src import persian_content, vocabulary, hacker_news, nasa
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ def build_report():
     stamp = local_stamp(now)
     # Only independent data collection is concurrent. Editorial calls and delivery stay ordered.
     collectors = {"weather": weather.get_mashhad_weather, "news": news.get_diverse_news,
+                  "nasa": nasa.get_card,
+                  "hacker_news": lambda: hacker_news.get_stories(now),
                   "sports": sports.get_sports_results, "song": song.get_trending_song,
                   "insight": writer.generate_daily_insight,
                   "vocabulary": lambda: vocabulary.get_vocabulary_cards(now),
@@ -58,6 +60,11 @@ def build_report():
             add_message(card["text"], card["image_url"])
     else:
         add_message(f"📰 **مرور خبرها**\n{stamp}\n\nخبر تازهٔ دارای تاریخ معتبر دریافت نشد؛ ممکن است خوراک‌ها در دسترس نباشند.")
+    existing_links = {item["link"] for items in (data["news"] or {}).values() for item in items}
+    hn_stories = [item for item in data["hacker_news"] or [] if item["link"] not in existing_links]
+    hn_cards = _collect("Hacker News editing", lambda: hacker_news.prepare_cards(hn_stories)) if hn_stories else []
+    for card in hn_cards or []:
+        add_message(card["text"], card["image_url"])
     if data["insight"]:
         add_message(f"💡 **دو نکته برای یادگیری**\n\n{data['insight']}")
     for card in data["vocabulary"] or []:
@@ -71,6 +78,8 @@ def build_report():
         add_message("\n\n".join(sections))
     if data["poetry"]:
         add_message(data["poetry"]["text"])
+    if data["nasa"]:
+        messages.append(data["nasa"])
     music_start = len(messages)
     track = data["song"]
     if track:
@@ -110,6 +119,7 @@ def run(dry_run=False, *, export_report=None):
             continue
         try:
             telegram_sender.send_illustrated_message(message["text"], message["image_url"])
+            telegram_sender.send_original(message)
         except telegram_sender.RecipientUnavailableError as exc:
             LOGGER.warning("Daily destination unavailable; remaining delivery skipped: %s", exc)
             failed = True

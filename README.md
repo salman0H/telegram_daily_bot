@@ -28,6 +28,7 @@ Daily Telegram Brief turns a handful of feeds and APIs into a readable morning r
 | :--- | :--- |
 | 🌤 **Your local forecast** | Current conditions and four upcoming three-hour forecast slots, displayed in your timezone. |
 | 📰 **The news desk** | Up to two recent stories per category: world and society, business, arts and culture, science and technology. Each story gets its own card with the original source link, publication time, and feed-provided photo when available. |
+| 🟠 **Hacker News** | Three recent submissions from the top-ranked list, with Persian editing when available, original links, discussion links, and source-reported scores/comment counts. |
 | 💡 **Two things to learn** | Short learning cards with an explanation, a practical exercise, and a reference. Topics span engineering, philosophy, books, mythology, and the physics of human movement. |
 | 🏆 **The final whistle** | Up to five final results each for soccer and basketball, covering games that started on the previous local calendar day. |
 | 🎧 **Press play** | A track from a fresh Spotify release, or up to five entries from the US iTunes Store song chart, with listening links and each track's own cover art when available. |
@@ -43,6 +44,14 @@ Each story and track is sent as a separate photo card with its text as the capti
 Captions are split conservatively at 1,024 UTF-16 units. Any remaining text follows in messages with its formatting intact. If Telegram explicitly rejects a larger rendition, the original source URL is tried. If no image can be sent, the complete text and source/listening link are sent instead. Ambiguous network failures do not trigger a second photo request, and blocked recipients are skipped immediately. Photo failure alone does not fail the report when the text fallback succeeds; a subsequent text-delivery failure still does. Preview mode prints image URLs without sending photos.
 
 Images must be publicly reachable by Telegram and satisfy its [photo requirements](https://core.telegram.org/bots/api#sendphoto). The bot does not fetch article pages, search for substitute pictures, or generate posters.
+
+### A window into Hacker News
+
+The [official Hacker News API](https://github.com/HackerNews/API) adds a separate section alongside the existing BBC categories. It needs no API key. Each run considers at most 25 entries from `topstories`, fetches item metadata in batches of five, and selects up to three valid recent story submissions in API ranking order. Jobs, comments, deleted/dead items, malformed records, duplicate titles/links, and submissions outside `NEWS_MAX_AGE_HOURS` are excluded. Links already selected by the BBC collector are omitted from this section too; filtering can leave fewer than the requested count.
+
+Cards retain the original article link and HN discussion link, with score/comment counts when the API supplies valid values. The timestamp is explicitly labeled as the **HN submission time**, not the original article's publication time: a newly shared article may itself be older. HN is a community link aggregator, and ranking is not independent verification of a claim.
+
+External links usually supply only a title. Editing is limited to that title and any text attached to the HN post; the bot does not fetch or summarize unseen article content or comments. Cards state this limitation. Original text remains available when Persian editing fails. The API provides no article image field, so these cards are text-only rather than borrowing unrelated pictures. The shared report snapshot includes the section for both requests and daily subscriber delivery. An API failure omits this section while the rest of the digest continues.
 
 ### Five recent releases, every daily report
 
@@ -119,7 +128,7 @@ flowchart LR
     E --> F[Deliver to Telegram]
 ```
 
-**Sources stay attached.** News comes from four BBC RSS sections. Headlines must have a valid publication date and URL. By default, stories older than 36 hours, dates more than five minutes into the future, and duplicate titles or links within the same run are excluded. Each category is ordered by recency. The current selection offers variety across topics; it uses one news publisher.
+**Sources stay attached.** The main news desk uses four BBC RSS sections, complemented by Hacker News community submissions. BBC headlines must have a valid publication date and URL; HN entries must have a valid submission timestamp. By default, entries older than 36 hours, dates more than five minutes into the future, and duplicate titles or links within each collector are excluded. BBC categories are ordered by recency; Hacker News preserves its API ranking. BBC remains the main news desk's publisher; HN submissions may link to various third-party sources.
 
 **The model has a narrow job.** Groq rewrites titles and short summaries into Persian. The rules in [`src/prompts.py`](src/prompts.py) call for neutral language, preserved attribution and uncertainty, and no invented facts, quotations, statistics, or instructions taken from source text. The application adds categories, source names, timestamps, original URLs, and source-provided image URLs itself.
 
@@ -207,6 +216,8 @@ Set these as environment variables locally or in the repository's Actions **Vari
 | `WEATHER_LON` | `59.6168` | Longitude, from -180 to 180. |
 | `NEWS_MAX_AGE_HOURS` | `36` | Maximum news age, from 1 to 168 hours. |
 | `NEWS_PER_CATEGORY` | `2` | Stories per category, from 1 to 3. |
+| `ENABLE_HACKER_NEWS` | `true` | Set `false` to omit Hacker News and its requests. |
+| `HACKER_NEWS_PER_DAY` | `3` | Hacker News submissions per report, from 1 to 5; subject to freshness and availability. |
 | `GROQ_MODELS` | `openai/gpt-oss-120b,llama-3.3-70b-versatile` | Comma-separated models in preference order. |
 | `ENABLE_AUDIO_DOWNLOAD` | `false` | Set to `true` to enable optional audio downloads. |
 
@@ -378,6 +389,7 @@ telegram_daily_bot/
 │   ├── sports.py                     # Final scores and local calendar filtering
 │   ├── song.py                       # Spotify/iTunes artwork and optional audio
 │   ├── member_bot.py                 # Membership gate, join buttons, bounded request polling
+│   ├── hacker_news.py                # Official HN API collection and attributed cards
 │   ├── subscribers.py                # Encrypted subscriptions and last daily delivery date
 │   ├── report_store.py               # Public snapshot schema, freshness, and size checks
 │   └── main.py                       # Report orchestration, snapshot export, and CLI
@@ -435,6 +447,7 @@ To change the editorial voice, edit `src/prompts.py`. To extend educational topi
 | Integration | Documentation |
 | :--- | :--- |
 | Telegram | [Bot API: messages, entities, and media](https://core.telegram.org/bots/api) |
+| Hacker News | [Official API: ranked stories and item metadata](https://github.com/HackerNews/API) |
 | Groq | [Models](https://console.groq.com/docs/models) · [Structured outputs and JSON mode](https://console.groq.com/docs/structured-outputs) |
 | OpenWeather | [Three-hour forecast API](https://openweathermap.org/api/forecast5) |
 | Sportradar | [Global Basketball event summaries](https://developer.sportradar.com/basketball/reference/global-basketball-sport-event-summary) |
@@ -451,3 +464,13 @@ This repository currently has no standalone license file. The previous README's 
 **A small daily ritual, powered by a small Python project.**
 
 </div>
+
+## Space, science, and your interests
+
+NASA's [APOD API](https://github.com/nasa/apod-api) adds one selected astronomy image to the shared daily report. Set Actions secret `NASA_API_KEY` to your free NASA key; the fallback `DEMO_KEY` has shared, restrictive quotas. Set `ENABLE_NASA=false` to disable it. Image cards include the APOD selection date (not the photograph's capture date), source credit, and a grounded Persian explanation when Groq is available. If translation fails, the original explanation is explicitly labeled. Video days link to the source instead of pretending to be photographs. Missing or stale data omits the section.
+
+The preview image is followed by the source's `hdurl` as a Telegram document, with a source button, for both channel and personal delivery. This avoids Telegram photo compression; it does not promise a raw camera file. Telegram must be able to fetch the document and accept its size/type. A rejected document falls back to the original download link. No substitute image or invented credit is generated. This first version uses APOD only; NASA Image Library search, discovery history, and interactive topic selection are not implemented.
+
+`NEWS_KEYWORDS` is an optional comma-separated Actions variable. Defaults prioritize Iran, the Middle East, America, technology, Elon Musk, NVIDIA, artificial intelligence, and computers, including Persian equivalents. Matching titles and descriptions rank ahead of other recent BBC entries within each category; this is prioritization, not an exhaustive search of the web. Freshness limits remain in force. Hacker News retains its own top-story ranking.
+
+Additional sources reviewed: [Wikimedia APIs](https://www.mediawiki.org/wiki/Wikimedia_APIs) are suitable for encyclopedic background, rather than treating edits as breaking news. No Wikimedia adapter is enabled in this version. [Guardian Open Platform](https://open-platform.theguardian.com/access/) requires a key and distinguishes noncommercial developer access from commercial licensing. It is not enabled automatically or presented as an unrestricted free source.

@@ -58,6 +58,11 @@ def _feed_image(entry):
     return ""
 
 
+def interest_score(text):
+    text = text.casefold()
+    return sum(bool(re.search(r"(?<!\w)" + re.escape(term.strip().casefold()) + r"(?!\w)", text)) for term in config.NEWS_KEYWORDS if term.strip())
+
+
 def get_diverse_news(now=None):
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=config.NEWS_MAX_AGE_HOURS)
@@ -79,7 +84,7 @@ def get_diverse_news(now=None):
                     continue
                 candidates.append((published, title, link, entry))
             items = []
-            for published, title, link, entry in sorted(candidates, key=lambda item: item[0], reverse=True):
+            for published, title, link, entry in sorted(candidates, key=lambda item: (interest_score(item[1] + " " + _strip_html(item[3].findtext("description"))), item[0]), reverse=True):
                 title_key = title.casefold()
                 if link in seen_links or title_key in seen_titles:
                     continue

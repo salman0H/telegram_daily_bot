@@ -55,11 +55,11 @@ def _post(method, body, content_type, timeout=20):
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/{method}"
     for attempt in range(3):
         # Multiple messages to one chat should not burst above one per second.
-        if method in {"sendMessage", "sendPhoto", "sendAudio"}:
+        if method in {"sendMessage", "sendPhoto", "sendAudio", "sendDocument"}:
             time.sleep(max(0, 1.05 - (time.monotonic() - _LAST_SEND)))
         request = urllib.request.Request(url, data=body, headers={"Content-Type": content_type})
         try:
-            if method in {"sendMessage", "sendPhoto", "sendAudio"}:
+            if method in {"sendMessage", "sendPhoto", "sendAudio", "sendDocument"}:
                 _LAST_SEND = time.monotonic()
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
@@ -80,7 +80,7 @@ def _post(method, body, content_type, timeout=20):
                 if isinstance(delay, (int, float)) and 0 <= delay <= 30:
                     time.sleep(delay)
                     continue
-            if status == 403 and method in {"sendMessage", "sendPhoto", "sendAudio"}:
+            if status == 403 and method in {"sendMessage", "sendPhoto", "sendAudio", "sendDocument"}:
                 raise RecipientUnavailableError(
                     f"Telegram {method}: recipient unavailable (HTTP 403)", chat_id=_resolve_target()) from None
             raise TelegramError(f"Telegram {method} failed (HTTP {status})", status_code=status) from None
@@ -189,3 +189,21 @@ def send_audio(file_path, caption=""):
         body.extend(audio.read())
     body.extend(f"\r\n--{boundary}--\r\n".encode())
     return _post("sendAudio", bytes(body), f"multipart/form-data; boundary={boundary}", timeout=90)
+
+
+def send_original(card):
+    url = safe_url(card.get("document_url", ""))
+    if not url:
+        return
+    source = safe_url(card.get("source_url", ""))
+    payload = {"chat_id": _resolve_target(), "document": url,
+               "caption": "فایل اصلی تصویر منتخب APOD؛ بدون فشرده‌سازی عکس تلگرام"}
+    if source:
+        payload["reply_markup"] = {"inline_keyboard": [[{"text": "منبع ناسا", "url": source}]]}
+    try:
+        return call_api("sendDocument", payload)
+    except RecipientUnavailableError:
+        raise
+    except TelegramError:
+        LOGGER.warning("Original image document unavailable; sending download link")
+        return send_message("دریافت فایل اصلی از منبع:\n" + url)

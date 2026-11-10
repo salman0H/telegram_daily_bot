@@ -44,6 +44,8 @@ if not -90 <= MASHHAD_LAT <= 90 or not -180 <= MASHHAD_LON <= 180:
     raise ValueError("Weather coordinates are out of range")
 NEWS_MAX_AGE_HOURS = _integer("NEWS_MAX_AGE_HOURS", 36, 1, 168)
 NEWS_PER_CATEGORY = _integer("NEWS_PER_CATEGORY", 2, 1, 3)
+ENABLE_HACKER_NEWS = _env("ENABLE_HACKER_NEWS", "true").lower() != "false"
+HACKER_NEWS_PER_DAY = _integer("HACKER_NEWS_PER_DAY", 3, 1, 5)
 GROQ_MODELS = [m.strip() for m in _env(
     "GROQ_MODELS", "openai/gpt-oss-120b,llama-3.3-70b-versatile"
 ).split(",") if m.strip()]
@@ -61,3 +63,7 @@ def validate(for_delivery=True):
         raise ValueError("TELEGRAM_BOT_TOKEN is required for delivery")
     if for_delivery and not (TELEGRAM_CHANNEL_ID or TELEGRAM_USER_ID):
         raise ValueError("Set TELEGRAM_CHANNEL_ID or TELEGRAM_USER_ID for delivery")
+
+NASA_API_KEY = _env("NASA_API_KEY", "DEMO_KEY") or "DEMO_KEY"
+ENABLE_NASA = _env("ENABLE_NASA", "true").lower() != "false"
+NEWS_KEYWORDS = (_env("NEWS_KEYWORDS") or _env("DEFAULT_NEWS_KEYWORDS", "iran,middle east,united states,america,technology,elon musk,nvidia,artificial intelligence,computer,ایران,خاورمیانه,آمریکا,هوش مصنوعی")).split(",")

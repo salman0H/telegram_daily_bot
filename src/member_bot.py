@@ -100,6 +100,7 @@ class MemberBot:
                     self._send(user_id, "ارسال این گزارش کامل نشد. لطفاً چند دقیقه بعد دوباره /report را بفرستید.", REPORT_BUTTON)
                     return False
                 telegram.send_illustrated_message(card["text"], card["image_url"])
+                telegram.send_original(card)
         self.reports_completed += 1
         if self.subscribers is not None:
             self.subscribers.delivered(user_id, self._report_day())
