@@ -5,7 +5,7 @@ import logging
 
 from src import config, writer
 from src.http_client import request_json
-from src.news import _strip_html, safe_url
+from src.news import _strip_html, safe_url, interest_score
 
 LOGGER = logging.getLogger(__name__)
 API = "https://hacker-news.firebaseio.com/v0"
@@ -71,9 +71,9 @@ def get_stories(now=None):
                     stories.append(item)
                     seen_links.add(item["link"])
                     seen_titles.add(item["title"].casefold())
-                    if len(stories) >= config.HACKER_NEWS_PER_DAY:
-                        return stories
-        return stories
+        # Stable sort preserves API ranking when interest scores tie.
+        stories.sort(key=lambda story: interest_score(story["title"] + " " + story["summary"]), reverse=True)
+        return stories[:config.HACKER_NEWS_PER_DAY]
     except Exception as exc:
         LOGGER.warning("Hacker News unavailable (%s)", type(exc).__name__)
         return []

@@ -1,0 +1,18 @@
+{
+  "description": "Edit keywords to prioritize matching recent BBC and Hacker News stories. English keywords match the original feeds; Persian equivalents are included for Persian sources.",
+  "keywords": [
+    "iran", "iranian", "tehran", "ایران", "ایرانی", "تهران",
+    "middle east", "خاورمیانه", "israel", "اسرائیل", "gaza", "غزه",
+    "united states", "u.s.", "usa", "america", "american", "آمریکا", "امریکا",
+    "technology", "فناوری", "تکنولوژی",
+    "elon musk", "ایلان ماسک", "spacex", "استارلینک", "starlink",
+    "nvidia", "انویدیا", "ان‌ویدیا", "geforce", "cuda",
+    "artificial intelligence", "هوش مصنوعی", "machine learning", "یادگیری ماشین",
+    "deep learning", "یادگیری عمیق", "llm", "openai", "chatgpt", "anthropic", "claude",
+    "computer", "computers", "computing", "کامپیوتر", "رایانه",
+    "gpu", "cpu", "processor", "پردازنده", "semiconductor", "تراشه",
+    "programming", "برنامه نویسی", "برنامه‌نویسی", "software", "نرم افزار", "نرم‌افزار",
+    "open source", "open-source", "متن باز", "متن‌باز", "github", "linux", "لینوکس",
+    "cybersecurity", "امنیت سایبری", "robotics", "رباتیک", "quantum computing", "رایانش کوانتومی"
+  ]
+}

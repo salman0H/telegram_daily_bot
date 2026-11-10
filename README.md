@@ -47,7 +47,7 @@ Images must be publicly reachable by Telegram and satisfy its [photo requirement
 
 ### A window into Hacker News
 
-The [official Hacker News API](https://github.com/HackerNews/API) adds a separate section alongside the existing BBC categories. It needs no API key. Each run considers at most 25 entries from `topstories`, fetches item metadata in batches of five, and selects up to three valid recent story submissions in API ranking order. Jobs, comments, deleted/dead items, malformed records, duplicate titles/links, and submissions outside `NEWS_MAX_AGE_HOURS` are excluded. Links already selected by the BBC collector are omitted from this section too; filtering can leave fewer than the requested count.
+The [official Hacker News API](https://github.com/HackerNews/API) adds a separate section alongside the existing BBC categories. It needs no API key. Each run considers at most 25 entries from `topstories`, fetches item metadata in batches of five, and selects up to three valid recent story submissions by keyword relevance, with API ranking as the tie-breaker. Jobs, comments, deleted/dead items, malformed records, duplicate titles/links, and submissions outside `NEWS_MAX_AGE_HOURS` are excluded. Links already selected by the BBC collector are omitted from this section too; filtering can leave fewer than the requested count.
 
 Cards retain the original article link and HN discussion link, with score/comment counts when the API supplies valid values. The timestamp is explicitly labeled as the **HN submission time**, not the original article's publication time: a newly shared article may itself be older. HN is a community link aggregator, and ranking is not independent verification of a claim.
 
@@ -128,7 +128,7 @@ flowchart LR
     E --> F[Deliver to Telegram]
 ```
 
-**Sources stay attached.** The main news desk uses four BBC RSS sections, complemented by Hacker News community submissions. BBC headlines must have a valid publication date and URL; HN entries must have a valid submission timestamp. By default, entries older than 36 hours, dates more than five minutes into the future, and duplicate titles or links within each collector are excluded. BBC categories are ordered by recency; Hacker News preserves its API ranking. BBC remains the main news desk's publisher; HN submissions may link to various third-party sources.
+**Sources stay attached.** The main news desk uses four BBC RSS sections, complemented by Hacker News community submissions. BBC headlines must have a valid publication date and URL; HN entries must have a valid submission timestamp. By default, entries older than 36 hours, dates more than five minutes into the future, and duplicate titles or links within each collector are excluded. BBC categories are ordered by recency; Hacker News prioritizes configured interests and preserves API rank for ties. BBC remains the main news desk's publisher; HN submissions may link to various third-party sources.
 
 **The model has a narrow job.** Groq rewrites titles and short summaries into Persian. The rules in [`src/prompts.py`](src/prompts.py) call for neutral language, preserved attribution and uncertainty, and no invented facts, quotations, statistics, or instructions taken from source text. The application adds categories, source names, timestamps, original URLs, and source-provided image URLs itself.
 
@@ -471,10 +471,18 @@ NASA's [APOD API](https://github.com/nasa/apod-api) adds one selected astronomy 
 
 The preview image is followed by the source's `hdurl` as a Telegram document, with a source button, for both channel and personal delivery. This avoids Telegram photo compression; it does not promise a raw camera file. Telegram must be able to fetch the document and accept its size/type. A rejected document falls back to the original download link. No substitute image or invented credit is generated. This first version uses APOD only; NASA Image Library search, discovery history, and interactive topic selection are not implemented.
 
-`NEWS_KEYWORDS` is an optional comma-separated Actions variable. Defaults prioritize Iran, the Middle East, America, technology, Elon Musk, NVIDIA, artificial intelligence, and computers, including Persian equivalents. Matching titles and descriptions rank ahead of other recent BBC entries within each category; this is prioritization, not an exhaustive search of the web. Freshness limits remain in force. Hacker News retains its own top-story ranking.
+`NEWS_KEYWORDS` is an optional comma-separated Actions variable. Defaults prioritize Iran, the Middle East, America, technology, Elon Musk, NVIDIA, artificial intelligence, and computers, including Persian equivalents. Matching titles and descriptions rank ahead of other recent BBC entries within each category; this is prioritization, not an exhaustive search of the web. Freshness limits remain in force. Hacker News now prioritizes the configured interests within its bounded candidate pool, retaining API rank for ties.
 
 Additional sources reviewed: [Wikimedia APIs](https://www.mediawiki.org/wiki/Wikimedia_APIs) are suitable for encyclopedic background, rather than treating edits as breaking news. No Wikimedia adapter is enabled in this version. [Guardian Open Platform](https://open-platform.theguardian.com/access/) requires a key and distinguishes noncommercial developer access from commercial licensing. It is not enabled automatically or presented as an unrestricted free source.
 
 ### APOD outage recovery
 
 If the NASA API fails or returns invalid/stale metadata, the collector reads the official NASA Science APOD landing page, follows its dated APOD article, and extracts the article's explanation, photographer credit, and original image link. It never selects the landing page's generic social-preview image. Selection dates are checked against the same two-day freshness window. If the page structure changes or an original image cannot be identified, the section is omitted rather than substituting an unrelated picture. This image fallback requires no API key. Video-only articles may remain unavailable during an API outage. Logs distinguish API failure, successful page fallback, and successful Telegram original-document delivery.
+
+### Edit your news interests
+
+The default interests now live in [`data/news_keywords.json`](data/news_keywords.json), in the `keywords` array. Add or remove strings, preserve valid JSON, and deploy your change. English terms matter because the current BBC/HN inputs are primarily English. The supplied list covers Iran, the Middle East, America, technology, Elon Musk, NVIDIA, AI, computers, programming, open source, and related topics. It is shared by all recipients rather than tracking individual user preferences.
+
+Each distinct matching phrase adds one point; matching ignores case and checks word boundaries. Several related keywords can raise a story's score. BBC candidates are ordered by interest score, then publication time within each category. Hacker News examines at most 25 ranked entries and prefers matching submissions, retaining HN rank for ties. Freshness, validity, and deduplication checks still apply. This prioritizes available source candidates, not an exhaustive search; if there are too few matches, other valid recent stories fill the remaining slots.
+
+Optional Actions variable `NEWS_KEYWORDS` (comma-separated) overrides the JSON list. Leave it empty or delete it to use the file. Invalid/missing JSON stops configuration with a clear error rather than silently ignoring your interests.

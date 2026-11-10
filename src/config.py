@@ -66,4 +66,22 @@ def validate(for_delivery=True):
 
 NASA_API_KEY = _env("NASA_API_KEY", "DEMO_KEY") or "DEMO_KEY"
 ENABLE_NASA = _env("ENABLE_NASA", "true").lower() != "false"
-NEWS_KEYWORDS = (_env("NEWS_KEYWORDS") or _env("DEFAULT_NEWS_KEYWORDS", "iran,middle east,united states,america,technology,elon musk,nvidia,artificial intelligence,computer,ایران,خاورمیانه,آمریکا,هوش مصنوعی")).split(",")
+def _news_keywords():
+    import json
+    from pathlib import Path
+    override = _env("NEWS_KEYWORDS")
+    if override:
+        return [word.strip() for word in override.split(",") if word.strip()]
+    path = Path(__file__).resolve().parent.parent / "data" / "news_keywords.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        words = data["keywords"]
+        if (not isinstance(words, list) or not 1 <= len(words) <= 500
+                or any(not isinstance(word, str) or not word.strip() or len(word) > 100 for word in words)):
+            raise ValueError("Invalid keyword list")
+        return list(dict.fromkeys(word.strip() for word in words))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError("data/news_keywords.json must contain a nonempty keywords array of strings") from exc
+
+
+NEWS_KEYWORDS = _news_keywords()
