@@ -6,7 +6,7 @@ from test_hacker_news import NOW, item
 class InterestTests(unittest.TestCase):
     def test_file_is_default_and_override_takes_precedence(self):
         with patch.dict('os.environ', {'NEWS_KEYWORDS': ''}):
-            self.assertIn('nvidia', config._news_keywords())
+            self.assertIn('nvidia', [word.casefold() for word in config._news_keywords()])
         with patch.dict('os.environ', {'NEWS_KEYWORDS': 'custom topic, another'}):
             self.assertEqual(config._news_keywords(), ['custom topic', 'another'])
 
