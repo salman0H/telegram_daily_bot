@@ -1,0 +1,30 @@
+name: Restore encrypted subscriptions
+description: Retrieve the latest encrypted state from the default branch of this repository
+runs:
+  using: composite
+  steps:
+    - name: Find encrypted state
+      id: state
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        artifact_info=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=subscribers-v1&per_page=100" \
+          --jq '.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == .workflow_run.repository_id) | [.id, .workflow_run.id, .workflow_run.head_branch] | @tsv' \
+          | awk -v branch="$DEFAULT_BRANCH" '$3 == branch && !found {print $1, $2; found=1}')
+        echo "artifact_id=${artifact_info%% *}" >> "$GITHUB_OUTPUT"
+        echo "run_id=${artifact_info#* }" >> "$GITHUB_OUTPUT"
+        if [ -z "$artifact_info" ]; then
+          echo '::notice::No subscriber artifact found; starting an empty subscriber list.'
+        fi
+    - name: Download encrypted state
+      if: steps.state.outputs.artifact_id != ''
+      uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ steps.state.outputs.artifact_id }}
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.state.outputs.run_id }}
+        merge-multiple: true
+        path: subscriber-cache

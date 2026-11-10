@@ -1,2 +1,4 @@
 # Lightweight Persian date and character utilities (MIT).
 persiantools==6.2.0
+# Authenticated encryption for the private subscriber artifact.
+cryptography==50.0.2

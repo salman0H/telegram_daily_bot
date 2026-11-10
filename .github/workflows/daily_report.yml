@@ -9,6 +9,8 @@ on:
         description: 'Preview in Actions logs without sending to Telegram'
         type: boolean
         default: false
+  repository_dispatch:
+    types: [daily-report]
   push:
   pull_request:
 
@@ -39,10 +41,17 @@ jobs:
           python -m unittest discover -s tests -v
 
   execute-bot:
-    if: vars.BOT_ENABLED != 'false' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    if: vars.BOT_ENABLED != 'false' && !(github.event_name == 'schedule' && vars.DAILY_EXTERNAL_SCHEDULER == 'true') && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+    # Both workflows share the encrypted state. Never run two writers/consumers.
+    concurrency:
+      group: telegram-member-state-${{ github.repository }}
+      cancel-in-progress: false
     env:
       ENABLE_AUDIO_DOWNLOAD: ${{ vars.ENABLE_AUDIO_DOWNLOAD || 'false' }}
       DRY_RUN: ${{ github.event_name == 'push' || inputs.dry_run }}
@@ -60,6 +69,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           python -m pip install -r requirements-audio.txt
       - name: Generate daily report
+        id: report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
@@ -83,11 +93,39 @@ jobs:
           NEWS_PER_CATEGORY: ${{ vars.NEWS_PER_CATEGORY || '2' }}
           GROQ_MODELS: ${{ vars.GROQ_MODELS || 'openai/gpt-oss-120b,llama-3.3-70b-versatile' }}
         run: |
+          python -c 'from datetime import datetime; from zoneinfo import ZoneInfo; print("Actual start (Tehran):", datetime.now(ZoneInfo("Asia/Tehran")).isoformat(), "| Scheduled target: 07:00")'
           if [ "$DRY_RUN" = "true" ]; then
             python -m src.main --dry-run --export-report report-cache/daily-report.json
           else
             python -m src.main --export-report report-cache/daily-report.json
           fi
+      - name: Restore encrypted subscriptions
+        id: subscribers
+        if: always() && env.DRY_RUN != 'true' && vars.DAILY_SUBSCRIPTIONS_ENABLED != 'false' && hashFiles('report-cache/daily-report.json') != ''
+        uses: ./.github/actions/restore-subscribers
+      - name: Deliver to subscribed channel members
+        if: always() && env.DRY_RUN != 'true' && vars.DAILY_SUBSCRIPTIONS_ENABLED != 'false' && steps.subscribers.outcome == 'success' && hashFiles('report-cache/daily-report.json') != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          SUBSCRIBER_STATE_KEY: ${{ secrets.SUBSCRIBER_STATE_KEY }}
+          MEMBERSHIP_CHANNEL_ID: ${{ vars.MEMBERSHIP_CHANNEL_ID || '@sentencedIntoMusic' }}
+          CHANNEL_JOIN_URL: ${{ secrets.CHANNEL_JOIN_URL || vars.CHANNEL_JOIN_URL }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Tehran' }}
+          DESTINATION_SERVED: ${{ steps.report.outcome == 'success' }}
+        run: |
+          args=()
+          if [ "$DESTINATION_SERVED" = 'true' ]; then args+=(--destination-already-served); fi
+          python -m src.member_bot --report report-cache/daily-report.json --state subscriber-cache/subscribers.enc --save-state subscriber-output/subscribers.enc --broadcast "${args[@]}"
+      - name: Retain encrypted subscription changes
+        if: always() && env.DRY_RUN != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscribers-v1
+          path: subscriber-output/subscribers.enc
+          retention-days: 90
+          if-no-files-found: ignore
       - name: Publish public report snapshot for member requests
         if: always()
         uses: actions/upload-artifact@v4
