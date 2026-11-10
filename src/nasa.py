@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from src import config, writer
 from src.http_client import request_json
 from src.news import safe_url
@@ -35,6 +36,10 @@ def get_card():
         if not image or not original:
             return None
         return {'text': text, 'image_url': image, 'document_url': original, 'source_url': source}
+    except HTTPError as exc:
+        LOGGER.warning("NASA APOD unavailable (HTTP %s); key mode: %s", exc.code, "demo" if config.NASA_API_KEY == "DEMO_KEY" else "personal")
+        exc.close()
+        return None
     except Exception as exc:
         LOGGER.warning('NASA APOD unavailable (%s)', type(exc).__name__)
         return None
